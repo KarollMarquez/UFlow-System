@@ -1,8 +1,9 @@
 import { AppContextType, Language } from './types';
 
 // --- CLAUDE API SERVICE ---
-const CLAUDE_API_URL = 'http://localhost:3001/api/chat';
-const CLAUDE_SUMMARY_URL = 'http://localhost:3001/api/summarize';
+const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+const CLAUDE_API_URL = isDev ? 'http://localhost:3001/api/chat' : '/api/chat';
+const CLAUDE_SUMMARY_URL = isDev ? 'http://localhost:3001/api/summarize' : '/api/summarize';
 
 interface AIMessage {
     role: 'user' | 'assistant';
