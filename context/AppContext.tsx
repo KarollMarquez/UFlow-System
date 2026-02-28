@@ -40,6 +40,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const isAuthCheckComplete = useRef(false);
   const [isLoadingUserData, setIsLoadingUserData] = useState(true);
+  const hasLoadedFromFirebase = useRef(false);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSavedDataRef = useRef<string>('');
   const latestSaveDataRef = useRef<{ uid: string; data: any } | null>(null);
@@ -48,7 +49,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // --- 1. PERSISTENCE LAYER (FIREBASE ONLY) ---
   // Keep a ref with latest data (sanitized) so beforeunload always has current state
   useEffect(() => {
-    if (state.user?.uid && !state.isLoading && !isLoadingUserData) {
+    if (state.user?.uid && !state.isLoading && !isLoadingUserData && hasLoadedFromFirebase.current) {
       latestSaveDataRef.current = {
         uid: state.user.uid,
         data: JSON.parse(JSON.stringify({
@@ -66,7 +67,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Debounced save: triggers on any data change (500ms)
   // JSON.parse(JSON.stringify()) strips undefined values that Firestore rejects
   useEffect(() => {
-    if (!state.isLoading && state.user?.uid && !isLoadingUserData) {
+    if (!state.isLoading && state.user?.uid && !isLoadingUserData && hasLoadedFromFirebase.current) {
       const dataToSave = JSON.parse(JSON.stringify({
         accounts: state.accounts,
         transactions: state.transactions,
@@ -89,7 +90,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           await setDoc(dataRef, dataToSave, { merge: true });
           lastSavedDataRef.current = dataString;
         } catch (e) {
-          console.error('Failed to save to Firebase:', e);
+          // silent fail
         }
       }, 500);
     }
@@ -162,6 +163,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           goals: (data.goals || []).map((g: any) => ({ ...g, contributions: g.contributions || [] })),
           planItems: (data.planItems || data.budgets || []).map((p: any) => ({ ...p, real: p.real ?? 0 })),
         }));
+        hasLoadedFromFirebase.current = true;
       } else {
         // New user - start with empty data
         const emptyData = {
@@ -176,11 +178,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           ...prev,
           ...emptyData
         }));
+        hasLoadedFromFirebase.current = true;
         // Save empty initial state to Firestore
         await setDoc(dataRef, emptyData);
       }
     } catch (e) {
-      // On error, keep current state (might be from localStorage cache)
+      // On error, still allow saving so user doesn't get stuck
+      hasLoadedFromFirebase.current = true;
     }
   };
 
@@ -226,7 +230,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         sharedListenersRef.current.push(unsub);
       });
     } catch (e) {
-      console.warn('Failed to load shared accounts:', e);
+      // silent fail
     }
   };
 
@@ -274,7 +278,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await loadSharedAccounts(uid);
 
     } catch (e) {
-      console.warn("Profile sync error", e);
+      // silent fail
     }
   };
 
@@ -318,6 +322,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
 
         // Block saving until user data is loaded from Firebase
+        hasLoadedFromFirebase.current = false;
         setIsLoadingUserData(true);
         loadFullUserProfile(firebaseUser.uid, firebaseUser).finally(() => {
           setIsLoadingUserData(false);
@@ -325,6 +330,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       } else {
         // User logged out - cleanup shared account listeners
+        hasLoadedFromFirebase.current = false;
         sharedListenersRef.current.forEach(unsub => unsub());
         sharedListenersRef.current = [];
         localStorage.removeItem('uflow_last_view');
@@ -792,7 +798,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         if (accData.inviteCode) await deleteDoc(doc(db, 'inviteCodes', accData.inviteCode));
       } catch (e) {
-        console.warn('Failed to delete invite code on leave:', e);
+        // silent fail
       }
     } else {
       // Remove user from members
@@ -867,7 +873,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         await deleteDoc(doc(db, 'inviteCodes', oldCode));
       }
     } catch (e) {
-      console.warn('Failed to delete old invite code:', oldCode, e);
+      // silent fail
     }
 
     await updateDoc(accRef, { inviteCode: newCode });

@@ -15,8 +15,9 @@ interface AIResponse {
     lang: Language;
     intent: 'create' | 'query' | 'unknown';
     structured?: {
-        type: 'transaction' | 'goal';
-        data: any;
+        type: 'transaction' | 'goal' | 'debt';
+        data?: any;
+        items?: any[];
     };
 }
 
@@ -81,6 +82,8 @@ export const callClaudeAPI = async (
                     transactions: context.transactions.slice(-10),
                     accounts: context.accounts,
                     creditCards: context.creditCards,
+                    debts: context.debts,
+                    goals: context.goals,
                     existingCategories: Array.from(new Set(context.transactions.map(tx => tx.category).filter(Boolean))),
                 },
                 dateInfo,
@@ -91,10 +94,13 @@ export const callClaudeAPI = async (
         });
 
         if (!response.ok) {
+            const errorBody = await response.text().catch(() => '');
+            console.error(`Claude API error ${response.status}:`, errorBody);
             throw new Error(`API error: ${response.status}`);
         }
 
         const data = await response.json();
+        console.log('Claude API response:', { intent: data.intent, hasStructured: !!data.structured, type: data.structured?.type });
         return {
             text: data.text || 'No response from AI',
             lang: data.lang || context.language,
@@ -129,7 +135,7 @@ export const generateChatSummary = async (messages: AIMessage[]): Promise<string
         const data = await response.json();
         return data.summary || null;
     } catch (error) {
-        console.error('Summary generation failed:', error);
+        // silent fail
         return null;
     }
 };

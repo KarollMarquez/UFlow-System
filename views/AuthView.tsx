@@ -40,7 +40,7 @@ export const AuthView: React.FC = () => {
         await register(email, password, name);
       }
     } catch (error: any) {
-      console.error("Auth Error:", error);
+      // Auth error handled below
       // Strip Firebase prefixes for cleaner UI
       const msg = error.message?.replace('Firebase: ', '').replace(' (auth/invalid-email).', '') || "Authentication Failed";
       setLocalError(msg);

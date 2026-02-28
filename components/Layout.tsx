@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { 
   LayoutDashboard, History, PieChart, Wallet, ShieldAlert, Target, Settings,
-  Menu, Plus, Eye, EyeOff, Moon, Sun, Sparkles, Loader2, Trash2, Pencil, ArrowRightLeft, CalendarRange
+  Menu, Plus, Eye, EyeOff, Moon, Sun, Sparkles, Loader2, Trash2, Pencil, ArrowRightLeft, CalendarRange, X
 } from 'lucide-react';
 import { cn, processAICommand, getTodayStr, dateToISO } from '../utils';
 import { Button, Modal, Input, Select, ToastContainer, Card, DatePicker } from './UIComponents';
@@ -24,26 +24,64 @@ const NavItem = ({ icon: Icon, label, active, onClick }: any) => (
   </button>
 );
 
-const DEFAULT_CATEGORIES = ['Food', 'Rent', 'Transport', 'Salary', 'Business', 'Entertainment', 'Shopping', 'Utilities', 'Health', 'Education', 'Transfer', 'General'];
-
 const useCategoryOptions = () => {
   const { transactions } = useApp();
-  const uniqueCategories = Array.from(new Set([
-    ...DEFAULT_CATEGORIES,
-    ...transactions.map(tx => tx.category).filter(Boolean)
-  ])).sort();
-  return uniqueCategories.map(c => ({ value: c, label: c }));
+  const userCategories = Array.from(new Set(
+    transactions.map(tx => tx.category).filter(Boolean)
+  )).sort();
+  return [
+    ...userCategories.map(c => ({ value: c, label: c })),
+    { value: '__new__', label: '+ Create new...' }
+  ];
+};
+
+// Reusable category picker: Select with "create new" option
+const CategoryPicker = ({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) => {
+  const categoryOptions = useCategoryOptions();
+  const [isCreating, setIsCreating] = useState(false);
+  const [newCat, setNewCat] = useState('');
+
+  if (isCreating) {
+    return (
+      <div className="space-y-1.5">
+        <label className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{label}</label>
+        <div className="flex gap-2">
+          <input
+            className="flex-1 h-9 px-3 rounded-xl bg-zinc-50 dark:bg-white/5 border border-zinc-200 dark:border-white/10 text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-brand-500/50"
+            placeholder="New category name..."
+            value={newCat}
+            onChange={e => setNewCat(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && newCat.trim()) { onChange(newCat.trim()); setIsCreating(false); setNewCat(''); } }}
+            autoFocus
+          />
+          <Button size="sm" type="button" onClick={() => { if (newCat.trim()) { onChange(newCat.trim()); setIsCreating(false); setNewCat(''); } }} disabled={!newCat.trim()}>OK</Button>
+          <Button size="sm" variant="ghost" type="button" onClick={() => { setIsCreating(false); setNewCat(''); }}>X</Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <Select
+      label={label}
+      value={value}
+      onChange={v => {
+        if (v === '__new__') { setIsCreating(true); return; }
+        onChange(v);
+      }}
+      options={categoryOptions}
+    />
+  );
 };
 
 const QuickInputModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => void }) => {
   const { t, accounts, addTransaction, timezone } = useApp();
-  const categoryOptions = useCategoryOptions();
   const [formData, setFormData] = useState({
     type: 'expense' as TransactionType,
     amount: '',
     currency: 'COP' as Currency,
     accountId: accounts[0]?.id || '',
-    category: 'Food',
+    category: '',
     date: getTodayStr(timezone),
     note: ''
   });
@@ -124,14 +162,13 @@ const QuickInputModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => 
           options={accounts.map(acc => ({ value: acc.id, label: `${acc.name} (${acc.currency})` }))}
         />
 
-        <Select
+        <CategoryPicker
           label={t('lbl.category')}
           value={formData.category}
           onChange={val => setFormData({...formData, category: val})}
-          options={categoryOptions}
         />
 
-        <Input 
+        <Input
           label={t('lbl.desc')}
           value={formData.note}
           onChange={e => setFormData({...formData, note: e.target.value})}
@@ -149,42 +186,76 @@ const QuickInputModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => 
 
 // --- CREATE WITH AI MODAL (Creation Only) ---
 const CreateWithAIModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => void }) => {
-  const { t, addTransaction, addGoal, accounts, creditCards, chargeCreditCard, payCreditCard, setView, addToast } = useApp();
+  const { t, addTransaction, addGoal, addDebt, accounts, creditCards, chargeCreditCard, payCreditCard, setView, addToast } = useApp();
   const context = useApp();
-  const categoryOptions = useCategoryOptions();
   const [prompt, setPrompt] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  
-  // Staging state for the "Editable Preview"
-  const [resultType, setResultType] = useState<'transaction' | 'goal' | null>(null);
-  const [draftTx, setDraftTx] = useState<any>(null);
-  const [draftGoal, setDraftGoal] = useState<any>(null);
+
+  // Batch-ready staging state
+  const [resultType, setResultType] = useState<'transaction' | 'goal' | 'debt' | null>(null);
+  const [drafts, setDrafts] = useState<any[]>([]);
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
 
   const handleGenerate = async () => {
     if (!prompt.trim()) return;
+
+    // Direct JSON import — bypass AI completely
+    const trimmed = prompt.trim();
+    if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        const items = Array.isArray(parsed) ? parsed : [parsed];
+        if (items.length > 0) {
+          const first = items[0];
+          let type: 'transaction' | 'goal' | 'debt' = 'transaction';
+          if (first.person && first.totalAmount !== undefined) type = 'debt';
+          else if (first.name && first.targetAmount !== undefined) type = 'goal';
+
+          const defaultAccountId = accounts[0]?.id || '';
+          const todayStr = new Date().toLocaleDateString('en-CA');
+          const normalized = items.map((item: any) => {
+            if (type === 'transaction') {
+              return {
+                type: item.type || 'expense',
+                amount: item.amount || 0,
+                currency: item.currency || context.currencyBase || 'COP',
+                accountId: item.accountId || defaultAccountId,
+                category: item.category || 'General',
+                note: item.note || '',
+                date: item.date ? item.date.split('T')[0] : todayStr,
+                creditCardId: item.creditCardId || null,
+                creditCardAction: item.creditCardAction || null,
+              };
+            }
+            return { ...item };
+          });
+
+          setResultType(type);
+          setDrafts(normalized);
+          setExpandedIdx(normalized.length === 1 ? 0 : null);
+          return;
+        }
+      } catch { /* not valid JSON, send to AI */ }
+    }
+
     setIsLoading(true);
     try {
       const response = await processAICommand(prompt, context, [], undefined, true);
-      
-      // Strict role enforcement
-      if (response.intent === 'query') {
-        const msg = response.lang === 'es' 
-           ? "Este botón es solo para crear entradas. Para consejos, usa el Asistente IA." 
-           : "This tool is for creating entries only. For advice, use the AI Assistant.";
-        addToast(msg, 'info');
-        return;
-      }
 
-      if (response.intent === 'create' && response.structured) {
-        setResultType(response.structured.type);
-        if (response.structured.type === 'transaction') {
-           setDraftTx({
-             ...response.structured.data,
-             date: response.structured.data.date.split('T')[0] // normalize for input date
-           });
-        } else {
-           setDraftGoal(response.structured.data);
-        }
+      // Accept structured data regardless of intent
+      const s = response.structured;
+      if (s && (s.items?.length || s.data)) {
+        const items = s.items || (s.data ? [s.data] : []);
+        const normalized = items.map((item: any) => {
+          if (s.type === 'transaction' && item.date) {
+            return { ...item, date: item.date.split('T')[0] };
+          }
+          return { ...item };
+        });
+
+        setResultType(s.type);
+        setDrafts(normalized);
+        setExpandedIdx(normalized.length === 1 ? 0 : null);
       } else {
         addToast(response.text, 'info');
       }
@@ -193,46 +264,191 @@ const CreateWithAIModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () =
     }
   };
 
+  const updateDraft = (idx: number, updates: any) => {
+    setDrafts(prev => prev.map((d, i) => i === idx ? { ...d, ...updates } : d));
+  };
+
+  const removeDraft = (idx: number) => {
+    setDrafts(prev => prev.filter((_, i) => i !== idx));
+    setExpandedIdx(null);
+  };
+
   const handleConfirm = () => {
-    if (resultType === 'transaction' && draftTx) {
-      const amount = parseFloat(draftTx.amount);
-      addTransaction({
-        ...draftTx,
-        date: dateToISO(draftTx.date),
-        amount,
-        creditCardId: draftTx.creditCardId || undefined,
-      });
-      // Handle credit card action
-      if (draftTx.creditCardId && draftTx.creditCardAction) {
-        if (draftTx.creditCardAction === 'charge') {
-          chargeCreditCard(draftTx.creditCardId, amount);
-        } else if (draftTx.creditCardAction === 'pay') {
-          payCreditCard(draftTx.creditCardId, amount);
+    if (!resultType || drafts.length === 0) return;
+    let targetView: string = 'history';
+
+    for (const draft of drafts) {
+      if (resultType === 'transaction') {
+        const amount = typeof draft.amount === 'string' ? parseFloat(draft.amount) : draft.amount;
+        addTransaction({
+          ...draft,
+          date: dateToISO(draft.date),
+          amount,
+          creditCardId: draft.creditCardId || undefined,
+        });
+        if (draft.creditCardId && draft.creditCardAction) {
+          if (draft.creditCardAction === 'charge') chargeCreditCard(draft.creditCardId, amount);
+          else if (draft.creditCardAction === 'pay') payCreditCard(draft.creditCardId, amount);
         }
+        targetView = 'history';
+      } else if (resultType === 'goal') {
+        addGoal({ ...draft, targetAmount: typeof draft.targetAmount === 'string' ? parseFloat(draft.targetAmount) : draft.targetAmount });
+        targetView = 'goals';
+      } else if (resultType === 'debt') {
+        addDebt({ person: draft.person, type: draft.type, totalAmount: typeof draft.totalAmount === 'string' ? parseFloat(draft.totalAmount) : draft.totalAmount, currency: draft.currency, status: draft.status || 'pending' });
+        targetView = 'debts';
       }
-      setView('history');
-    } else if (resultType === 'goal' && draftGoal) {
-      addGoal({
-        ...draftGoal,
-        targetAmount: parseFloat(draftGoal.targetAmount)
-      });
-      // Redirect to Goals
-      setView('goals');
     }
+
+    const count = drafts.length;
+    addToast(count > 1 ? `${count} items created` : 'Item created', 'success');
+    setView(targetView);
     handleClose();
   };
 
   const handleClose = () => {
     onClose();
     setResultType(null);
-    setDraftTx(null);
-    setDraftGoal(null);
+    setDrafts([]);
+    setExpandedIdx(null);
     setPrompt('');
+  };
+
+  // Render single item: full editable form (original look)
+  const renderSingleTransaction = (item: any) => (
+    <Card className="bg-brand-500/5 border-brand-500/20 p-5 space-y-4">
+      <div className="grid grid-cols-2 gap-4">
+        <Select label="Type" value={item.type} onChange={v => updateDraft(0, { type: v })} options={[{value:'expense',label:'Expense'},{value:'income',label:'Income'},{value:'adjustment',label:'Adjustment'}]} />
+        <DatePicker label="Date" value={item.date} onChange={v => updateDraft(0, { date: v })} />
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        <div className="col-span-2"><Input label="Amount" type="number" value={item.amount} onChange={e => updateDraft(0, { amount: e.target.value })} className="font-mono font-bold" /></div>
+        <Select label="Currency" value={item.currency} onChange={v => updateDraft(0, { currency: v })} options={[{value:'COP',label:'COP'},{value:'USD',label:'USD'},{value:'EUR',label:'EUR'}]} />
+      </div>
+      <Select label="Account" value={item.accountId} onChange={v => updateDraft(0, { accountId: v })} options={accounts.map(acc => ({ value: acc.id, label: acc.name }))} />
+      <CategoryPicker label="Category" value={item.category} onChange={v => updateDraft(0, { category: v })} />
+      <Input label="Note" value={item.note || ''} onChange={e => updateDraft(0, { note: e.target.value })} />
+      {item.creditCardId && (() => {
+        const card = creditCards.find((c: any) => c.id === item.creditCardId);
+        return card ? (
+          <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-bold ${item.creditCardAction === 'pay' ? 'bg-green-500/10 border-green-500/20 text-green-600 dark:text-green-400' : 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400'}`}>
+            <span>{item.creditCardAction === 'pay' ? 'Pago →' : 'Cargo →'} {card.name}</span>
+          </div>
+        ) : null;
+      })()}
+    </Card>
+  );
+
+  const renderSingleGoal = (item: any) => (
+    <Card className="bg-brand-500/5 border-brand-500/20 p-5 space-y-4">
+      <Input label="Goal Name" value={item.name} onChange={e => updateDraft(0, { name: e.target.value })} />
+      <div className="grid grid-cols-3 gap-3">
+        <div className="col-span-2"><Input label="Target Amount" type="number" value={item.targetAmount} onChange={e => updateDraft(0, { targetAmount: e.target.value })} /></div>
+        <Select label="Currency" value={item.currency} onChange={v => updateDraft(0, { currency: v })} options={[{value:'COP',label:'COP'},{value:'USD',label:'USD'},{value:'EUR',label:'EUR'}]} />
+      </div>
+    </Card>
+  );
+
+  const renderSingleDebt = (item: any) => (
+    <Card className="bg-brand-500/5 border-brand-500/20 p-5 space-y-4">
+      <Input label="Person" value={item.person} onChange={e => updateDraft(0, { person: e.target.value })} />
+      <Select label="Type" value={item.type} onChange={v => updateDraft(0, { type: v })} options={[{ value: 'owes_me', label: 'They owe me' }, { value: 'i_owe', label: 'I owe them' }]} />
+      <div className="grid grid-cols-3 gap-3">
+        <div className="col-span-2"><Input label="Amount" type="number" value={item.totalAmount} onChange={e => updateDraft(0, { totalAmount: e.target.value })} className="font-mono font-bold" /></div>
+        <Select label="Currency" value={item.currency} onChange={v => updateDraft(0, { currency: v })} options={[{value:'COP',label:'COP'},{value:'USD',label:'USD'},{value:'EUR',label:'EUR'}]} />
+      </div>
+    </Card>
+  );
+
+  // Compact summary for batch items (2+)
+  const renderCompactItem = (item: any, idx: number) => {
+    const isExpanded = expandedIdx === idx;
+    if (resultType === 'transaction') {
+      return (
+        <div key={idx} className="border border-zinc-200 dark:border-white/10 rounded-xl overflow-hidden">
+          <div className="flex items-center gap-3 p-3 cursor-pointer hover:bg-zinc-50 dark:hover:bg-white/5" onClick={() => setExpandedIdx(isExpanded ? null : idx)}>
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold ${item.type === 'income' ? 'bg-green-500/10 text-green-600' : 'bg-red-500/10 text-red-600'}`}>
+              {item.type === 'income' ? '+' : '-'}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium text-zinc-900 dark:text-white truncate">{item.category}{item.note ? ` — ${item.note}` : ''}</div>
+              <div className="text-xs text-zinc-500">{item.date}</div>
+            </div>
+            <div className="text-sm font-bold font-mono text-zinc-900 dark:text-white">{Number(item.amount).toLocaleString()} {item.currency}</div>
+            <button onClick={e => { e.stopPropagation(); removeDraft(idx); }} className="text-zinc-400 hover:text-red-500 p-1"><X className="w-3.5 h-3.5" /></button>
+          </div>
+          {isExpanded && (
+            <div className="p-3 pt-0 border-t border-zinc-100 dark:border-white/5 space-y-3 animate-in fade-in slide-in-from-top-2">
+              <div className="grid grid-cols-2 gap-3">
+                <Select label="Type" value={item.type} onChange={v => updateDraft(idx, { type: v })} options={[{value:'expense',label:'Expense'},{value:'income',label:'Income'},{value:'adjustment',label:'Adjustment'}]} />
+                <DatePicker label="Date" value={item.date} onChange={v => updateDraft(idx, { date: v })} />
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-2"><Input label="Amount" type="number" value={item.amount} onChange={e => updateDraft(idx, { amount: e.target.value })} className="font-mono font-bold" /></div>
+                <Select label="Currency" value={item.currency} onChange={v => updateDraft(idx, { currency: v })} options={[{value:'COP',label:'COP'},{value:'USD',label:'USD'},{value:'EUR',label:'EUR'}]} />
+              </div>
+              <Select label="Account" value={item.accountId} onChange={v => updateDraft(idx, { accountId: v })} options={accounts.map(acc => ({ value: acc.id, label: acc.name }))} />
+              <CategoryPicker label="Category" value={item.category} onChange={v => updateDraft(idx, { category: v })} />
+              <Input label="Note" value={item.note || ''} onChange={e => updateDraft(idx, { note: e.target.value })} />
+            </div>
+          )}
+        </div>
+      );
+    }
+    if (resultType === 'goal') {
+      return (
+        <div key={idx} className="border border-zinc-200 dark:border-white/10 rounded-xl overflow-hidden">
+          <div className="flex items-center gap-3 p-3 cursor-pointer hover:bg-zinc-50 dark:hover:bg-white/5" onClick={() => setExpandedIdx(isExpanded ? null : idx)}>
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold bg-brand-500/10 text-brand-600">G</div>
+            <div className="flex-1 min-w-0"><div className="text-sm font-medium text-zinc-900 dark:text-white truncate">{item.name}</div></div>
+            <div className="text-sm font-bold font-mono text-zinc-900 dark:text-white">{Number(item.targetAmount).toLocaleString()} {item.currency}</div>
+            <button onClick={e => { e.stopPropagation(); removeDraft(idx); }} className="text-zinc-400 hover:text-red-500 p-1"><X className="w-3.5 h-3.5" /></button>
+          </div>
+          {isExpanded && (
+            <div className="p-3 pt-0 border-t border-zinc-100 dark:border-white/5 space-y-3 animate-in fade-in slide-in-from-top-2">
+              <Input label="Goal Name" value={item.name} onChange={e => updateDraft(idx, { name: e.target.value })} />
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-2"><Input label="Target Amount" type="number" value={item.targetAmount} onChange={e => updateDraft(idx, { targetAmount: e.target.value })} /></div>
+                <Select label="Currency" value={item.currency} onChange={v => updateDraft(idx, { currency: v })} options={[{value:'COP',label:'COP'},{value:'USD',label:'USD'},{value:'EUR',label:'EUR'}]} />
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+    if (resultType === 'debt') {
+      return (
+        <div key={idx} className="border border-zinc-200 dark:border-white/10 rounded-xl overflow-hidden">
+          <div className="flex items-center gap-3 p-3 cursor-pointer hover:bg-zinc-50 dark:hover:bg-white/5" onClick={() => setExpandedIdx(isExpanded ? null : idx)}>
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold ${item.type === 'owes_me' ? 'bg-green-500/10 text-green-600' : 'bg-amber-500/10 text-amber-600'}`}>
+              {item.type === 'owes_me' ? '↓' : '↑'}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium text-zinc-900 dark:text-white truncate">{item.person}</div>
+              <div className="text-xs text-zinc-500">{item.type === 'owes_me' ? 'They owe me' : 'I owe them'}</div>
+            </div>
+            <div className="text-sm font-bold font-mono text-zinc-900 dark:text-white">{Number(item.totalAmount).toLocaleString()} {item.currency}</div>
+            <button onClick={e => { e.stopPropagation(); removeDraft(idx); }} className="text-zinc-400 hover:text-red-500 p-1"><X className="w-3.5 h-3.5" /></button>
+          </div>
+          {isExpanded && (
+            <div className="p-3 pt-0 border-t border-zinc-100 dark:border-white/5 space-y-3 animate-in fade-in slide-in-from-top-2">
+              <Input label="Person" value={item.person} onChange={e => updateDraft(idx, { person: e.target.value })} />
+              <Select label="Type" value={item.type} onChange={v => updateDraft(idx, { type: v })} options={[{ value: 'owes_me', label: 'They owe me' }, { value: 'i_owe', label: 'I owe them' }]} />
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-2"><Input label="Amount" type="number" value={item.totalAmount} onChange={e => updateDraft(idx, { totalAmount: e.target.value })} className="font-mono font-bold" /></div>
+                <Select label="Currency" value={item.currency} onChange={v => updateDraft(idx, { currency: v })} options={[{value:'COP',label:'COP'},{value:'USD',label:'USD'},{value:'EUR',label:'EUR'}]} />
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+    return null;
   };
 
   return (
     <Modal isOpen={isOpen} onClose={handleClose} title={t('ai.modal_title')}>
-      {!resultType ? (
+      {drafts.length === 0 ? (
         <div className="space-y-6">
           <div className="relative">
             <textarea
@@ -245,10 +461,10 @@ const CreateWithAIModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () =
             />
             <div className="absolute bottom-3 right-3 text-xs text-zinc-400">Shift+Enter for new line</div>
           </div>
-          
-          <Button 
-            className="w-full h-12" 
-            onClick={handleGenerate} 
+
+          <Button
+            className="w-full h-12"
+            onClick={handleGenerate}
             disabled={!prompt.trim() || isLoading}
           >
             {isLoading ? (
@@ -259,103 +475,36 @@ const CreateWithAIModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () =
           </Button>
         </div>
       ) : (
-        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+        <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
           <div className="flex items-center justify-between">
              <div className="flex items-center gap-2 text-brand-500 text-sm font-bold uppercase tracking-wider">
-               <Sparkles className="w-4 h-4" /> Draft Generated
+               <Sparkles className="w-4 h-4" /> {drafts.length > 1 ? `${drafts.length} Drafts` : 'Draft Generated'}
              </div>
-             <Button variant="ghost" size="sm" onClick={() => setResultType(null)} className="h-8 text-xs">Back to prompt</Button>
+             <Button variant="ghost" size="sm" onClick={() => { setDrafts([]); setResultType(null); }} className="h-8 text-xs">Back to prompt</Button>
           </div>
-          
-          {/* Editable Preview Card */}
-          <Card className="bg-brand-500/5 border-brand-500/20 p-5 space-y-4">
-            
-            {resultType === 'transaction' && draftTx && (
-              <>
-                 <div className="grid grid-cols-2 gap-4">
-                   <Select 
-                      label="Type"
-                      value={draftTx.type}
-                      onChange={v => setDraftTx({...draftTx, type: v})}
-                      options={[{value:'expense',label:'Expense'},{value:'income',label:'Income'},{value:'adjustment',label:'Adjustment'}]}
-                   />
-                   <DatePicker
-                      label="Date"
-                      value={draftTx.date}
-                      onChange={v => setDraftTx({...draftTx, date: v})}
-                   />
-                 </div>
-                 <div className="grid grid-cols-3 gap-3">
-                   <div className="col-span-2">
-                      <Input 
-                        label="Amount"
-                        type="number"
-                        value={draftTx.amount}
-                        onChange={e => setDraftTx({...draftTx, amount: e.target.value})}
-                        className="font-mono font-bold"
-                      />
-                   </div>
-                   <Select 
-                      label="Currency"
-                      value={draftTx.currency}
-                      onChange={v => setDraftTx({...draftTx, currency: v})}
-                      options={[{value:'COP',label:'COP'},{value:'USD',label:'USD'},{value:'EUR',label:'EUR'}]}
-                   />
-                 </div>
-                 <Select 
-                    label="Account"
-                    value={draftTx.accountId}
-                    onChange={v => setDraftTx({...draftTx, accountId: v})}
-                    options={accounts.map(acc => ({ value: acc.id, label: acc.name }))}
-                 />
-                 <Select
-                    label="Category"
-                    value={draftTx.category}
-                    onChange={v => setDraftTx({...draftTx, category: v})}
-                    options={categoryOptions}
-                 />
-                 {draftTx.creditCardId && (() => {
-                   const card = creditCards.find((c: any) => c.id === draftTx.creditCardId);
-                   return card ? (
-                     <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-bold ${draftTx.creditCardAction === 'pay' ? 'bg-green-500/10 border-green-500/20 text-green-600 dark:text-green-400' : 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400'}`}>
-                       <span>{draftTx.creditCardAction === 'pay' ? '💳 Pago →' : '💳 Cargo →'} {card.name}</span>
-                     </div>
-                   ) : null;
-                 })()}
-              </>
-            )}
 
-            {resultType === 'goal' && draftGoal && (
-               <>
-                 <Input 
-                    label="Goal Name"
-                    value={draftGoal.name}
-                    onChange={e => setDraftGoal({...draftGoal, name: e.target.value})}
-                 />
-                 <div className="grid grid-cols-3 gap-3">
-                   <div className="col-span-2">
-                     <Input 
-                        label="Target Amount"
-                        type="number"
-                        value={draftGoal.targetAmount}
-                        onChange={e => setDraftGoal({...draftGoal, targetAmount: e.target.value})}
-                     />
-                   </div>
-                   <Select 
-                      label="Currency"
-                      value={draftGoal.currency}
-                      onChange={v => setDraftGoal({...draftGoal, currency: v})}
-                      options={[{value:'COP',label:'COP'},{value:'USD',label:'USD'},{value:'EUR',label:'EUR'}]}
-                   />
-                 </div>
-               </>
-            )}
+          {drafts.length === 1 ? (
+            // Single item: full editable form (original look)
+            <>
+              {resultType === 'transaction' && renderSingleTransaction(drafts[0])}
+              {resultType === 'goal' && renderSingleGoal(drafts[0])}
+              {resultType === 'debt' && renderSingleDebt(drafts[0])}
+            </>
+          ) : (
+            // Batch: compact list with expandable items
+            <>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">Click any item to expand and edit. Remove items with X.</p>
+              <div className="space-y-2 max-h-[50vh] overflow-y-auto custom-scrollbar">
+                {drafts.map((item, idx) => renderCompactItem(item, idx))}
+              </div>
+            </>
+          )}
 
-          </Card>
-
-          <div className="flex gap-3">
+          <div className="flex gap-3 pt-2">
              <Button variant="ghost" className="flex-1" onClick={handleClose}>{t('act.cancel')}</Button>
-             <Button className="flex-[2]" onClick={handleConfirm}>{t('act.confirm_create')}</Button>
+             <Button className="flex-[2]" onClick={handleConfirm} disabled={drafts.length === 0}>
+               {drafts.length > 1 ? `Create All (${drafts.length})` : t('act.confirm_create')}
+             </Button>
           </div>
         </div>
       )}
@@ -366,7 +515,6 @@ const CreateWithAIModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () =
 // --- EDIT TRANSACTION MODAL (72h Window) ---
 const EditTransactionModal = () => {
   const { t, accounts, editingTransaction, setEditingTransaction, updateTransaction, deleteTransaction } = useApp();
-  const categoryOptions = useCategoryOptions();
   const [formData, setFormData] = useState({
     type: 'expense' as TransactionType,
     amount: '',
@@ -484,11 +632,10 @@ const EditTransactionModal = () => {
           options={accounts.map(acc => ({ value: acc.id, label: `${acc.name} (${acc.currency})` }))}
         />
 
-        <Select
+        <CategoryPicker
           label={t('lbl.category')}
           value={formData.category}
           onChange={val => setFormData({...formData, category: val})}
-          options={categoryOptions}
         />
 
         <Input
@@ -694,39 +841,40 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
       <main className="flex-1 flex flex-col relative min-w-0 md:pl-60 transition-all duration-300">
 
         {/* Header - Floating Glass */}
-        <header className="h-14 flex items-center justify-between px-4 sm:px-6 z-30 sticky top-0 mt-3 mx-3 sm:mx-6 rounded-2xl glass-panel shadow-premium dark:shadow-glass-sm mb-4">
-          <div className="flex items-center gap-3">
-            <button className="md:hidden p-1.5 text-zinc-600 dark:text-zinc-300 rounded-xl hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors" onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
+        <header className="h-12 sm:h-14 flex items-center justify-between px-2.5 sm:px-4 md:px-6 z-30 sticky top-0 mt-2 sm:mt-3 mx-2 sm:mx-3 md:mx-6 rounded-xl sm:rounded-2xl glass-panel shadow-premium dark:shadow-glass-sm mb-3 sm:mb-4">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <button className="md:hidden p-1.5 text-zinc-600 dark:text-zinc-300 rounded-xl hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors shrink-0" onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
               <Menu className="w-5 h-5" />
             </button>
-            <h2 className="text-base font-bold text-zinc-900 dark:text-white tracking-tight">
+            <h2 className="text-sm sm:text-base font-bold text-zinc-900 dark:text-white tracking-tight truncate">
               {NAV_ITEMS.find(n => n.id === currentView)?.label}
             </h2>
           </div>
-          
-          <div className="flex items-center gap-1.5 sm:gap-2">
+
+          <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 shrink-0">
             {/* Create with AI Button */}
             <Button
                variant="primary"
-               className="bg-gradient-to-r from-violet-600 to-fuchsia-600 border-none shadow-neon"
+               size="sm"
+               className="bg-gradient-to-r from-violet-600 to-fuchsia-600 border-none shadow-neon sm:h-9 sm:px-4 sm:text-sm"
                onClick={() => setAiCreateOpen(true)}
             >
                <Sparkles className="w-3.5 h-3.5" />
                <span className="hidden sm:inline">{t('act.create_ai')}</span>
             </Button>
 
-            <Button variant="icon" onClick={togglePrivacy} title="Toggle Privacy">
-              {privacyMode ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            <Button variant="icon" size="sm" className="sm:h-9 sm:w-9" onClick={togglePrivacy} title="Toggle Privacy">
+              {privacyMode ? <EyeOff className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <Eye className="w-3.5 h-3.5 sm:w-4 sm:h-4" />}
             </Button>
-            <Button variant="icon" onClick={toggleTheme} className="hidden sm:flex">
+            <Button variant="icon" size="sm" className="hidden sm:flex sm:h-9 sm:w-9" onClick={toggleTheme}>
               {theme === 'dark' ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
             </Button>
-            <div className="h-6 w-px bg-zinc-200 dark:bg-white/10 mx-1" />
-            <Button variant="secondary" onClick={() => setTransferOpen(true)} className="rounded-xl">
+            <div className="h-5 sm:h-6 w-px bg-zinc-200 dark:bg-white/10 hidden sm:block mx-0.5 sm:mx-1" />
+            <Button variant="secondary" size="sm" onClick={() => setTransferOpen(true)} className="rounded-xl sm:h-9 sm:px-4 sm:text-sm">
               <ArrowRightLeft className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">{t('act.transfer')}</span>
             </Button>
-            <Button onClick={() => setQuickInputOpen(true)} className="rounded-xl shadow-neon hover:shadow-neon-sm transition-shadow">
+            <Button size="sm" onClick={() => setQuickInputOpen(true)} className="rounded-xl shadow-neon hover:shadow-neon-sm transition-shadow sm:h-9 sm:px-4 sm:text-sm">
               <Plus className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">New Entry</span>
             </Button>

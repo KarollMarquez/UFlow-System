@@ -144,8 +144,9 @@ export interface AIMessage {
   content: string;
   timestamp: number;
   suggestion?: {
-    type: 'transaction' | 'goal';
-    data: any;
+    type: 'transaction' | 'goal' | 'debt';
+    data?: any;
+    items?: any[];
   };
 }
 

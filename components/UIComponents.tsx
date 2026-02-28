@@ -13,12 +13,12 @@ export interface ToastData {
 
 export const ToastContainer: React.FC<{ toasts: ToastData[]; removeToast: (id: string) => void }> = ({ toasts, removeToast }) => {
   return (
-    <div className="fixed bottom-6 right-6 z-[60] flex flex-col gap-3 pointer-events-none">
+    <div className="fixed bottom-4 right-3 left-3 sm:left-auto sm:bottom-6 sm:right-6 z-[60] flex flex-col gap-3 pointer-events-none">
       {toasts.map(toast => (
-        <div 
+        <div
           key={toast.id}
           className={cn(
-            "pointer-events-auto min-w-[320px] p-4 rounded-2xl border backdrop-blur-xl shadow-glass flex items-center gap-3 transition-all duration-500 animate-in slide-in-from-right-12 fade-in",
+            "pointer-events-auto w-full sm:min-w-[320px] sm:w-auto p-3 sm:p-4 rounded-xl sm:rounded-2xl border backdrop-blur-xl shadow-glass flex items-center gap-3 transition-all duration-500 animate-in slide-in-from-right-12 fade-in",
             toast.type === 'success' && "bg-white/90 dark:bg-[#1A1A25]/90 border-green-500/20 text-green-700 dark:text-green-400",
             toast.type === 'error' && "bg-white/90 dark:bg-[#1A1A25]/90 border-red-500/20 text-red-700 dark:text-red-400",
             toast.type === 'info' && "bg-white/90 dark:bg-[#1A1A25]/90 border-brand-500/20 text-brand-700 dark:text-brand-400",
@@ -240,9 +240,9 @@ export const Toggle: React.FC<ToggleProps> = ({ label, checked, onChange }) => {
 export const Modal: React.FC<{ isOpen: boolean; onClose: () => void; title: string; children: React.ReactNode }> = ({ isOpen, onClose, title, children }) => {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-md animate-in fade-in duration-300">
-      <div className="w-full max-w-md glass-panel rounded-2xl shadow-2xl animate-in zoom-in-95 slide-in-from-bottom-5 duration-300 max-h-[90vh] overflow-y-auto border border-white/20 dark:border-white/10">
-        <div className="flex items-center justify-between p-4 border-b border-zinc-200/50 dark:border-white/10 sticky top-0 bg-white/80 dark:bg-[#151520]/80 backdrop-blur-xl z-10">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/40 backdrop-blur-md animate-in fade-in duration-300">
+      <div className="w-full sm:max-w-md glass-panel rounded-t-2xl sm:rounded-2xl shadow-2xl animate-in slide-in-from-bottom-5 sm:zoom-in-95 duration-300 max-h-[85vh] sm:max-h-[90vh] overflow-y-auto border border-white/20 dark:border-white/10">
+        <div className="flex items-center justify-between p-3 sm:p-4 border-b border-zinc-200/50 dark:border-white/10 sticky top-0 bg-white/80 dark:bg-[#151520]/80 backdrop-blur-xl z-10">
           <h3 className="font-bold text-base tracking-tight text-zinc-900 dark:text-white">{title}</h3>
           <button onClick={onClose} className="p-1.5 hover:bg-zinc-100 dark:hover:bg-white/10 rounded-full transition-colors group">
             <X className="w-4 h-4 text-zinc-500 group-hover:text-red-500 transition-colors" />

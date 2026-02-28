@@ -76,13 +76,15 @@ interface AIResponse {
   lang: Language;
   intent: 'create' | 'query' | 'unknown';
   structured?: {
-    type: 'transaction' | 'goal';
-    data: any;
+    type: 'transaction' | 'goal' | 'debt';
+    data?: any;
+    items?: any[];
   };
 }
 
-// Flag to track if Claude is available
+// Flag to track if Claude is available — retries after 30s cooldown
 let claudeAvailable: boolean | null = null;
+let claudeLastFailure = 0;
 
 // Minimal language detection helpers (keep simple)
 const ES_COMMON_WORDS = ['que', 'el', 'la', 'en', 'un', 'una', 'gasté', 'pagué', 'hoy', 'ayer'];
@@ -231,8 +233,9 @@ export const processAICommand = async (
   previousSummary?: string,
   forceCreate?: boolean
 ): Promise<AIResponse> => {
-  // Try Claude API first
-  if (claudeAvailable !== false) {
+  // Try Claude API first — retry after 30s cooldown if it was down
+  const shouldTryClaude = claudeAvailable !== false || (Date.now() - claudeLastFailure > 30_000);
+  if (shouldTryClaude) {
     try {
       const claudeResponse = await callClaudeAPI(prompt, context, messages, previousSummary, forceCreate);
 
@@ -240,23 +243,59 @@ export const processAICommand = async (
       if (claudeResponse.intent !== 'unknown' || !claudeResponse.text.includes('Error')) {
         claudeAvailable = true;
 
-        // Ensure date is properly formatted for transactions
-        if (claudeResponse.structured?.type === 'transaction' && claudeResponse.structured.data) {
-          const data = claudeResponse.structured.data;
-          if (!data.date) {
-            const tz = context.timezone === 'auto' ? Intl.DateTimeFormat().resolvedOptions().timeZone : (context.timezone || 'America/Bogota');
-            data.date = new Date().toLocaleDateString('en-CA', { timeZone: tz }) + 'T12:00:00.000Z';
+        // Normalize: ensure items[] array exists (batch support)
+        if (claudeResponse.structured) {
+          const s = claudeResponse.structured;
+          if (s.items && s.items.length > 0) {
+            // Batch response — keep items, clear data
+            s.data = undefined;
+          } else if (s.data) {
+            // Single response — wrap in items array
+            s.items = [s.data];
           }
-          if (!data.accountId && context.accounts.length > 0) {
-            data.accountId = context.accounts[0].id;
+
+          // Infer type if missing — Claude sometimes omits "type" at the structured level
+          if (!s.type && s.items && s.items.length > 0) {
+            const first = s.items[0];
+            if (first.person && first.totalAmount !== undefined) {
+              s.type = 'debt';
+            } else if (first.name && first.targetAmount !== undefined) {
+              s.type = 'goal';
+            } else {
+              s.type = 'transaction';
+            }
+          }
+
+          const tz = context.timezone === 'auto' ? Intl.DateTimeFormat().resolvedOptions().timeZone : (context.timezone || 'America/Bogota');
+
+          // Apply defaults to each item
+          for (const item of (s.items || [])) {
+            if (s.type === 'transaction') {
+              if (!item.date) {
+                item.date = new Date().toLocaleDateString('en-CA', { timeZone: tz }) + 'T12:00:00.000Z';
+              }
+              if (!item.accountId && context.accounts.length > 0) {
+                item.accountId = context.accounts[0].id;
+              }
+            } else if (s.type === 'debt') {
+              if (!item.currency) item.currency = context.currencyBase;
+              if (!item.status) item.status = 'pending';
+            } else if (s.type === 'goal') {
+              if (!item.currency) item.currency = context.currencyBase;
+              if (!item.status) item.status = 'active';
+              if (item.currentAmount === undefined) item.currentAmount = 0;
+              if (!item.contributions) item.contributions = [];
+            }
           }
         }
 
         return claudeResponse;
       }
     } catch (error) {
+      // Claude API unavailable, falling back to local NLP (will retry after cooldown)
       console.warn('Claude API unavailable, falling back to local NLP:', error);
       claudeAvailable = false;
+      claudeLastFailure = Date.now();
     }
   }
 

@@ -76,38 +76,45 @@ Mapeo de palabras clave:
 - Business: negocio, inversión, cliente, factura, freelance, proyecto
 - Savings: ahorro, reserva, fondo, CDT
 
+## DEUDAS EXISTENTES DEL USUARIO
+${context?.debts?.length ? context.debts.map((d: any) => `- persona: "${d.person}", tipo: ${d.type === 'owes_me' ? 'me debe' : 'le debo'}, monto: ${d.totalAmount} ${d.currency}, estado: ${d.status}`).join('\n') : 'No hay deudas registradas.'}
+
+## METAS DE AHORRO DEL USUARIO
+${context?.goals?.length ? context.goals.filter((g: any) => g.status === 'active').map((g: any) => `- nombre: "${g.name}", meta: ${g.targetAmount} ${g.currency}, progreso: ${g.currentAmount}/${g.targetAmount}`).join('\n') : 'No hay metas registradas.'}
+
 ## DETECCIÓN DE TIPO
-- "gasté", "pagué", "compré", "me costó" = expense
-- "me pagaron", "recibí", "cobré", "vendí", "sueldo" = income
-- Si no es claro, asume "expense"
+- "gasté", "pagué", "compré", "me costó" = transaction (expense)
+- "me pagaron", "recibí", "cobré", "vendí", "sueldo" = transaction (income)
+- "me debe", "le presté", "le fié" = debt (type: owes_me)
+- "le debo", "me prestó", "me prestaron", "me fiaron" = debt (type: i_owe)
+- "quiero ahorrar", "meta de ahorro", "ahorrar para" = goal
+- Si no es claro, asume transaction expense
 
 ## REGLAS PARA EL CAMPO "note"
-- NO copies el texto del usuario tal cual. Parafrasea en una descripción breve y específica (2-4 palabras máximo).
+- NO copies el texto del usuario tal cual. Parafrasea en una descripción breve (2-4 palabras máximo).
 - Si la nota sería redundante con la categoría, déjala como string vacío "".
 
-## FORMATO DE RESPUESTA (SIEMPRE crear)
-{
-  "text": "Breve confirmación de lo detectado",
-  "lang": "es",
-  "intent": "create",
-  "structured": {
-    "type": "transaction",
-    "data": {
-      "type": "expense" o "income",
-      "amount": número,
-      "currency": "COP",
-      "accountId": "id de la cuenta inferida del contexto",
-      "category": "categoría inferida del mapeo",
-      "note": "descripción breve o vacío si redundante",
-      "date": "YYYY-MM-DDT12:00:00.000Z",
-      "creditCardId": "id de la tarjeta si aplica, o null",
-      "creditCardAction": "charge" o "pay" o null
-    }
-  }
-}
+## FORMATOS DE RESPUESTA (SIEMPRE crear)
+
+Para TRANSACCIÓN:
+{ "text": "Confirmación", "lang": "es", "intent": "create", "structured": { "type": "transaction", "data": { "type": "expense|income", "amount": número, "currency": "COP", "accountId": "id", "category": "categoría", "note": "breve", "date": "YYYY-MM-DDT12:00:00.000Z", "creditCardId": "id o null", "creditCardAction": "charge|pay|null" } } }
+
+Para DEUDA:
+{ "text": "Confirmación", "lang": "es", "intent": "create", "structured": { "type": "debt", "data": { "person": "nombre", "type": "owes_me|i_owe", "totalAmount": número, "currency": "COP", "status": "pending" } } }
+
+Para META DE AHORRO:
+{ "text": "Confirmación", "lang": "es", "intent": "create", "structured": { "type": "goal", "data": { "name": "nombre", "targetAmount": número, "currentAmount": 0, "currency": "COP", "status": "active", "contributions": [] } } }
+
+## CREACIÓN MÚLTIPLE (BATCH)
+Si el usuario menciona VARIOS gastos, ingresos, deudas o metas en UN SOLO mensaje, devuelve "items" (array) en vez de "data":
+{ "text": "Resumen", "lang": "es", "intent": "create", "structured": { "type": "transaction", "items": [ { ...item1 }, { ...item2 }, { ...item3 } ] } }
+Cada item dentro de "items" tiene el MISMO formato que "data" individual.
+Si todos los items son del mismo tipo (ej: todos transacciones), usa ese tipo.
+Si es UN SOLO item, usa "data" como siempre.
 
 ## IMPORTANTE
 - SIEMPRE responde con intent: "create" y structured data
+- Detecta el tipo correcto: transaction, debt o goal según el contexto
 - Si el monto no es claro, usa 0 y el usuario lo editará
 - Infiere la fecha del contexto (ej: "ayer" = fecha de ayer)
 - La nota debe ser específica y breve, NUNCA una copia del mensaje original`;
@@ -120,6 +127,7 @@ Mapeo de palabras clave:
 2. **Consejos**: Da consejos financieros personalizados
 3. **Transacciones**: Cuando el usuario quiera registrar un gasto/ingreso, extrae los datos estructurados
 4. **Metas**: Ayuda a establecer y seguir metas de ahorro
+5. **Deudas**: Ayuda a registrar deudas (préstamos, dinero que te deben o que debes)
 
 ## FECHA DE REFERENCIA
 Hoy es: ${dateInfo.today} (${dateInfo.dayName})
@@ -141,6 +149,12 @@ ${context?.creditCards?.length ? context.creditCards.map((c: any) => `- id: "${c
 Si el usuario gasta con tarjeta de crédito → creditCardId + creditCardAction: "charge"
 Si el usuario paga su tarjeta → creditCardId + creditCardAction: "pay", category: "Card Payment"
 
+## DEUDAS DEL USUARIO
+${context?.debts?.length ? context.debts.map((d: any) => `- persona: "${d.person}", tipo: ${d.type === 'owes_me' ? 'me debe' : 'le debo'}, monto: ${d.totalAmount} ${d.currency}, estado: ${d.status}`).join('\n') : 'No hay deudas registradas.'}
+
+## METAS DE AHORRO
+${context?.goals?.length ? context.goals.filter((g: any) => g.status === 'active').map((g: any) => `- nombre: "${g.name}", meta: ${g.targetAmount} ${g.currency}, progreso: ${g.currentAmount}/${g.targetAmount}`).join('\n') : 'No hay metas registradas.'}
+
 ## CATEGORÍAS DEL USUARIO
 CATEGORÍAS EXISTENTES (PRIORIZA ESTAS):
 ${context?.existingCategories?.length ? context.existingCategories.join(', ') : 'Shopping, Food, Transport, Rent, Utilities, Entertainment, Salary, Health, Education, Business, Savings'}
@@ -151,37 +165,43 @@ REGLAS: SIEMPRE usa una categoría existente si aplica. Solo crea una nueva si n
 Responde SIEMPRE con JSON válido:
 
 Para conversación/consejos:
-{
-  "text": "Tu respuesta conversacional aquí",
-  "lang": "es",
-  "intent": "query"
-}
+{ "text": "Tu respuesta conversacional aquí", "lang": "es", "intent": "query" }
 
-Para crear transacción:
-{
-  "text": "Confirmación del registro",
-  "lang": "es",
-  "intent": "create",
-  "structured": {
-    "type": "transaction",
-    "data": {
-      "type": "expense|income",
-      "amount": número,
-      "currency": "COP",
-      "accountId": "id de la cuenta inferida",
-      "category": "categoría",
-      "note": "descripción breve o vacío si redundante",
-      "date": "YYYY-MM-DDT12:00:00.000Z",
-      "creditCardId": "id si involucra tarjeta, o null",
-      "creditCardAction": "charge|pay|null"
-    }
-  }
-}
+Para crear TRANSACCIÓN:
+{ "text": "Confirmación", "lang": "es", "intent": "create", "structured": { "type": "transaction", "data": { "type": "expense|income", "amount": número, "currency": "COP", "accountId": "id", "category": "categoría", "note": "breve", "date": "YYYY-MM-DDT12:00:00.000Z", "creditCardId": "id o null", "creditCardAction": "charge|pay|null" } } }
+
+Para crear DEUDA:
+{ "text": "Confirmación", "lang": "es", "intent": "create", "structured": { "type": "debt", "data": { "person": "nombre", "type": "owes_me|i_owe", "totalAmount": número, "currency": "COP", "status": "pending" } } }
+
+Para crear META DE AHORRO:
+{ "text": "Confirmación", "lang": "es", "intent": "create", "structured": { "type": "goal", "data": { "name": "nombre", "targetAmount": número, "currentAmount": 0, "currency": "COP", "status": "active", "contributions": [] } } }
+
+## DETECCIÓN DE INTENCIÓN — SÉ AGRESIVO AL CREAR
+Cuando el mensaje del usuario contenga montos, nombres de gastos, o cualquier indicación de registro financiero, CREA directamente con intent: "create". NO preguntes confirmación, NO pidas más datos, NO respondas con intent: "query" explicando qué podrías hacer.
+
+Señales de que debes CREAR (intent: "create"):
+- Montos: "50k", "300mil", "15.000", cualquier número con contexto financiero
+- Verbos: "gasté", "compré", "pagué", "recibí", "me pagaron", "cobré", "vendí"
+- Deudas: "me debe", "le presté", "le fié", "le debo", "me prestó", "me fiaron"
+- Metas: "quiero ahorrar", "meta de ahorro", "ahorrar para"
+- Listas de gastos: "almuerzo 15k, uber 8k, netflix 30k"
+- Si el usuario da un monto sin contexto, asume gasto genérico y CRÉALO
+
+Solo usa intent: "query" para:
+- Preguntas como "cuánto gasté este mes", "dame un consejo", "cómo puedo ahorrar"
+- Saludos: "hola", "qué tal"
+- Conversación sin datos financieros concretos
+
+## CREACIÓN MÚLTIPLE (BATCH)
+Si el usuario menciona VARIOS gastos/ingresos/deudas en un solo mensaje, usa "items" (array) en vez de "data":
+{ "text": "Resumen", "lang": "es", "intent": "create", "structured": { "type": "transaction", "items": [ { ...item1 }, { ...item2 } ] } }
+Si es un solo item, usa "data" como siempre.
 
 ## IMPORTANTE
 - Mantén el contexto de la conversación
 - Sé proactivo con consejos cuando sea apropiado
-- NO crees transacciones a menos que el usuario explícitamente quiera registrar algo`;
+- NUNCA respondas explicando lo que podrías hacer — simplemente hazlo
+- Si el usuario da datos suficientes para crear (monto + contexto), CREA inmediatamente`;
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -232,9 +252,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             } else if (cleanJson.startsWith('```')) {
                 cleanJson = cleanJson.replace(/^```\s*/, '').replace(/\s*```$/, '');
             }
-            const parsed = JSON.parse(cleanJson);
+            let parsed = JSON.parse(cleanJson);
+
+            // Fix: if AI has structured data but said "query", override to "create"
+            if (parsed.structured && (parsed.structured.data || parsed.structured.items)) {
+                parsed.intent = 'create';
+            }
+            if (forceCreate && parsed.structured) {
+                parsed.intent = 'create';
+            }
+
             return res.status(200).json(parsed);
         } catch {
+            // Try to extract embedded JSON from text
+            const jsonMatch = responseText.match(/\{[\s\S]*"structured"\s*:\s*\{[\s\S]*\}\s*\}/);
+            if (jsonMatch) {
+                try {
+                    const extracted = JSON.parse(jsonMatch[0]);
+                    if (extracted.structured) extracted.intent = 'create';
+                    return res.status(200).json(extracted);
+                } catch {}
+            }
+
             return res.status(200).json({
                 text: responseText,
                 lang: 'es',
@@ -243,7 +282,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             });
         }
     } catch (error: any) {
-        console.error('Claude API Error:', error);
         return res.status(500).json({
             error: error.message,
             text: 'Error conectando con el servicio de IA. Por favor intenta de nuevo.',

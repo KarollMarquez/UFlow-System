@@ -2551,6 +2551,9 @@ export const SettingsView = () => {
     resetData, logout, user, t
   } = useApp();
 
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetConfirmText, setResetConfirmText] = useState('');
+
   const resolvedTz = timezone === 'auto' ? Intl.DateTimeFormat().resolvedOptions().timeZone : timezone;
   const TIMEZONE_OPTIONS = [
     { value: 'auto', label: `Auto (${Intl.DateTimeFormat().resolvedOptions().timeZone})` },
@@ -2635,18 +2638,54 @@ export const SettingsView = () => {
           <Button variant="secondary" onClick={logout} className="border-red-200 dark:border-red-900/30 hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 dark:text-red-400">
             <LogOut className="w-4 h-4" /> {language === 'es' ? 'Cerrar Sesión' : 'Log Out'}
           </Button>
-          <Button variant="danger" onClick={() => { if (window.confirm(language === 'es' ? '¿Estás seguro? Esto borrará todos los datos locales.' : 'Are you sure? This will wipe all local data.')) resetData() }}>
+          <Button variant="danger" onClick={() => { setResetConfirmText(''); setShowResetModal(true); }}>
             {language === 'es' ? 'Reinicio de Fábrica' : 'Factory Reset Data'}
           </Button>
         </div>
       </Card>
+
+      {/* Factory Reset Confirmation Modal */}
+      <Modal isOpen={showResetModal} onClose={() => setShowResetModal(false)} title={language === 'es' ? 'Confirmar Reinicio de Fábrica' : 'Confirm Factory Reset'}>
+        <div className="space-y-4">
+          <p className="text-sm text-red-600 dark:text-red-400 font-medium">
+            {language === 'es'
+              ? 'Esta acción eliminará permanentemente todas tus cuentas, transacciones, deudas, metas y tarjetas de crédito. No se puede deshacer.'
+              : 'This will permanently delete all your accounts, transactions, debts, goals, and credit cards. This cannot be undone.'}
+          </p>
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            {language === 'es'
+              ? 'Escribe RESET para confirmar:'
+              : 'Type RESET to confirm:'}
+          </p>
+          <input
+            type="text"
+            value={resetConfirmText}
+            onChange={(e) => setResetConfirmText(e.target.value)}
+            placeholder="RESET"
+            className="w-full px-3 py-2 rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-red-500"
+            autoComplete="off"
+          />
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" onClick={() => setShowResetModal(false)}>
+              {language === 'es' ? 'Cancelar' : 'Cancel'}
+            </Button>
+            <Button
+              variant="danger"
+              disabled={resetConfirmText !== 'RESET'}
+              onClick={() => { setShowResetModal(false); resetData(); }}
+            >
+              {language === 'es' ? 'Eliminar Todo' : 'Delete Everything'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };
 
 // --- AI ASSISTANT VIEW ---
 export const AIAssistantView = () => {
-  const { t, user, addTransaction, addGoal, setView } = useApp();
+  const { t, user, addTransaction, addGoal, addDebt, chargeCreditCard, payCreditCard } = useApp();
   const context = useApp();
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -2695,6 +2734,43 @@ export const AIAssistantView = () => {
     }
   }, [messages, isTyping]);
 
+  // Try to parse direct JSON input (array or object with transactions/debts/goals)
+  const tryParseDirectJSON = (text: string): { type: 'transaction' | 'goal' | 'debt'; items: any[] } | null => {
+    const trimmed = text.trim();
+    if (!trimmed.startsWith('[') && !trimmed.startsWith('{')) return null;
+    try {
+      const parsed = JSON.parse(trimmed);
+      const items = Array.isArray(parsed) ? parsed : [parsed];
+      if (items.length === 0) return null;
+
+      // Detect type from first item
+      const first = items[0];
+      if (first.person && (first.type === 'owes_me' || first.type === 'i_owe') && first.totalAmount !== undefined) {
+        return { type: 'debt', items };
+      }
+      if (first.name && first.targetAmount !== undefined) {
+        return { type: 'goal', items };
+      }
+      // Default: transaction — fill in missing fields
+      const defaultAccountId = context.accounts?.[0]?.id || '';
+      const todayISO = new Date().toLocaleDateString('en-CA') + 'T12:00:00.000Z';
+      const normalized = items.map((item: any) => ({
+        type: item.type || 'expense',
+        amount: item.amount || 0,
+        currency: item.currency || context.currencyBase || 'COP',
+        accountId: item.accountId || defaultAccountId,
+        category: item.category || 'General',
+        note: item.note || '',
+        date: item.date || todayISO,
+        creditCardId: item.creditCardId || null,
+        creditCardAction: item.creditCardAction || null,
+      }));
+      return { type: 'transaction', items: normalized };
+    } catch {
+      return null;
+    }
+  };
+
   const handleSend = async () => {
     if (!inputValue.trim()) return;
 
@@ -2707,6 +2783,14 @@ export const AIAssistantView = () => {
 
     setMessages(prev => [...prev, userMsg]);
     setInputValue('');
+
+    // Direct JSON import — bypass AI completely
+    const directJSON = tryParseDirectJSON(userMsg.content);
+    if (directJSON) {
+      handleApplySuggestion(directJSON);
+      return;
+    }
+
     setIsTyping(true);
 
     try {
@@ -2722,12 +2806,15 @@ export const AIAssistantView = () => {
         previousSummary
       );
 
+      // If AI returned intent "query" but has structured data, still treat as suggestion
+      const suggestion = response.structured || null;
+
       const aiMsg: AIMessage = {
         id: generateId(),
         role: 'assistant',
         content: response.text,
         timestamp: Date.now(),
-        suggestion: response.structured
+        suggestion: suggestion || undefined
       };
 
       setMessages(prev => [...prev, aiMsg]);
@@ -2738,11 +2825,55 @@ export const AIAssistantView = () => {
 
 
   const handleApplySuggestion = (suggestion: any) => {
-    if (suggestion.type === 'transaction') {
-      addTransaction(suggestion.data);
+    try {
+      // Normalize: items array (batch) or single data → array
+      const items: any[] = suggestion.items || (suggestion.data ? [suggestion.data] : []);
+      if (items.length === 0) return;
+
+      // Infer type if missing
+      let sType = suggestion.type;
+      if (!sType && items.length > 0) {
+        const f = items[0];
+        if (f.person && f.totalAmount !== undefined) sType = 'debt';
+        else if (f.name && f.targetAmount !== undefined) sType = 'goal';
+        else sType = 'transaction';
+      }
+
+      for (const data of items) {
+        if (sType === 'transaction') {
+          const amount = typeof data.amount === 'string' ? parseFloat(data.amount) : data.amount;
+          addTransaction({
+            ...data,
+            amount,
+            date: data.date?.includes('T') ? data.date : (data.date + 'T12:00:00.000Z'),
+            creditCardId: data.creditCardId || undefined,
+          });
+          if (data.creditCardId && data.creditCardAction) {
+            if (data.creditCardAction === 'charge') chargeCreditCard(data.creditCardId, amount);
+            else if (data.creditCardAction === 'pay') payCreditCard(data.creditCardId, amount);
+          }
+        } else if (sType === 'goal') {
+          addGoal({
+            ...data,
+            targetAmount: typeof data.targetAmount === 'string' ? parseFloat(data.targetAmount) : data.targetAmount,
+            currentAmount: data.currentAmount || 0,
+            contributions: data.contributions || [],
+          });
+        } else if (sType === 'debt') {
+          addDebt({
+            person: data.person,
+            type: data.type,
+            totalAmount: typeof data.totalAmount === 'string' ? parseFloat(data.totalAmount) : data.totalAmount,
+            currency: data.currency,
+            status: data.status || 'pending',
+          });
+        }
+      }
+
+      const count = items.length;
       const feedback = context.language === 'es'
-        ? '✅ Transacción creada exitosamente. Redirigiendo...'
-        : '✅ Transaction created successfully. Redirecting...';
+        ? `✅ ${count > 1 ? `${count} registros creados` : 'Registro creado'} exitosamente.`
+        : `✅ ${count > 1 ? `${count} items created` : 'Item created'} successfully.`;
 
       setMessages(prev => [...prev, {
         id: generateId(),
@@ -2750,22 +2881,16 @@ export const AIAssistantView = () => {
         content: feedback,
         timestamp: Date.now()
       }]);
-
-      setTimeout(() => setView('history'), 1500);
-
-    } else if (suggestion.type === 'goal') {
-      addGoal(suggestion.data);
-      const feedback = context.language === 'es'
-        ? '✅ Meta de ahorro establecida. Redirigiendo...'
-        : '✅ Savings goal set. Redirecting...';
-
+    } catch (error) {
+      console.error('Error applying suggestion:', error);
       setMessages(prev => [...prev, {
         id: generateId(),
         role: 'assistant',
-        content: feedback,
+        content: context.language === 'es'
+          ? '❌ Error al crear el registro. Intenta de nuevo.'
+          : '❌ Error creating entry. Please try again.',
         timestamp: Date.now()
       }]);
-      setTimeout(() => setView('goals'), 1500);
     }
   };
 
@@ -2808,19 +2933,45 @@ export const AIAssistantView = () => {
                 <p className="whitespace-pre-line">{msg.content}</p>
 
                 {/* Suggestion Card inside Chat */}
-                {msg.suggestion && (
-                  <div className="mt-4 p-3 bg-brand-500/5 border border-brand-500/20 rounded-xl">
-                    <div className="flex items-center gap-2 mb-2 text-xs font-bold text-brand-600 dark:text-brand-400 uppercase tracking-wide">
-                      <Sparkles className="w-3 h-3" /> Suggested Action
+                {msg.suggestion && (() => {
+                  const items = msg.suggestion.items || (msg.suggestion.data ? [msg.suggestion.data] : []);
+                  if (items.length === 0) return null;
+                  const count = items.length;
+                  // Infer type if missing
+                  const f = items[0];
+                  const sType = msg.suggestion.type || (f.person && f.totalAmount !== undefined ? 'debt' : f.name && f.targetAmount !== undefined ? 'goal' : 'transaction');
+                  return (
+                    <div className="mt-4 p-3 bg-brand-500/5 border border-brand-500/20 rounded-xl">
+                      <div className="flex items-center gap-2 mb-2 text-xs font-bold text-brand-600 dark:text-brand-400 uppercase tracking-wide">
+                        <Sparkles className="w-3 h-3" /> {count > 1 ? `${count} Suggested Items` : 'Suggested Action'}
+                      </div>
+                      <div className="space-y-1.5 mb-3">
+                        {items.map((item: any, idx: number) => (
+                          <div key={idx} className="text-xs text-zinc-600 dark:text-zinc-400 bg-white/50 dark:bg-black/20 p-2 rounded border border-black/5 dark:border-white/5 flex items-center gap-2">
+                            {sType === 'transaction' && (
+                              <><span className={item.type === 'income' ? 'text-green-500' : 'text-red-500'}>{item.type === 'income' ? '+' : '-'}</span>
+                              <span className="font-mono font-bold">{Number(item.amount).toLocaleString()}</span>
+                              <span className="text-zinc-400">{item.currency}</span>
+                              <span className="truncate">{item.category}{item.note ? ` — ${item.note}` : ''}</span></>
+                            )}
+                            {sType === 'debt' && (
+                              <><span>{item.person}</span><span className="text-zinc-400">·</span>
+                              <span className="font-mono font-bold">{Number(item.totalAmount).toLocaleString()}</span>
+                              <span className="text-zinc-400">{item.type === 'owes_me' ? 'me debe' : 'le debo'}</span></>
+                            )}
+                            {sType === 'goal' && (
+                              <><span>{item.name}</span><span className="text-zinc-400">·</span>
+                              <span className="font-mono font-bold">{Number(item.targetAmount).toLocaleString()}</span></>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                      <Button size="sm" className="w-full" onClick={() => handleApplySuggestion(msg.suggestion)}>
+                        {count > 1 ? `Create All (${count})` : 'Confirm & Create'}
+                      </Button>
                     </div>
-                    <div className="text-xs font-mono mb-3 text-zinc-600 dark:text-zinc-400 bg-white/50 dark:bg-black/20 p-2 rounded border border-black/5 dark:border-white/5">
-                      {JSON.stringify(msg.suggestion.data, null, 2).substring(0, 150)}...
-                    </div>
-                    <Button size="sm" className="w-full" onClick={() => handleApplySuggestion(msg.suggestion)}>
-                      Confirm & Create
-                    </Button>
-                  </div>
-                )}
+                  );
+                })()}
               </div>
             </div>
           ))}

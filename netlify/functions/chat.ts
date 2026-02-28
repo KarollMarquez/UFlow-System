@@ -144,7 +144,6 @@ export default async (request: Request) => {
             },
         });
     } catch (error: any) {
-        console.error('Claude API Error:', error);
         return new Response(JSON.stringify({
             text: 'Error conectando con IA',
             lang: 'es',
