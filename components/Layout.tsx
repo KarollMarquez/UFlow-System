@@ -41,6 +41,12 @@ const CategoryPicker = ({ label, value, onChange }: { label: string; value: stri
   const [isCreating, setIsCreating] = useState(false);
   const [newCat, setNewCat] = useState('');
 
+  // Ensure current value always appears in options (covers newly-created categories)
+  const options = React.useMemo(() => {
+    if (!value || value === '__new__' || categoryOptions.some(o => o.value === value)) return categoryOptions;
+    return [{ value, label: value }, ...categoryOptions];
+  }, [value, categoryOptions]);
+
   if (isCreating) {
     return (
       <div className="space-y-1.5">
@@ -69,12 +75,12 @@ const CategoryPicker = ({ label, value, onChange }: { label: string; value: stri
         if (v === '__new__') { setIsCreating(true); return; }
         onChange(v);
       }}
-      options={categoryOptions}
+      options={options}
     />
   );
 };
 
-const QuickInputModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => void }) => {
+const QuickInputModal = ({ isOpen, onClose, onOpenAI }: { isOpen: boolean, onClose: () => void, onOpenAI?: () => void }) => {
   const { t, accounts, addTransaction, timezone } = useApp();
   const [formData, setFormData] = useState({
     type: 'expense' as TransactionType,
@@ -111,6 +117,16 @@ const QuickInputModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => 
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={t('act.quick_input')}>
+      {onOpenAI && (
+        <button
+          type="button"
+          onClick={() => { onClose(); onOpenAI(); }}
+          className="w-full mb-4 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white text-sm font-semibold shadow-neon hover:opacity-90 transition-opacity"
+        >
+          <Sparkles className="w-4 h-4" />
+          {t('act.create_ai')}
+        </button>
+      )}
       <form onSubmit={handleSubmit} className="space-y-6">
         <div className="grid grid-cols-2 gap-4">
           <Select 
@@ -806,13 +822,10 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   return (
     <div className="flex h-screen bg-light-bg dark:bg-dark-bg overflow-hidden font-sans selection:bg-brand-500/30 selection:text-white">
       {/* Sidebar Desktop - Floating Glass with Shadow */}
-      <aside className="hidden md:flex w-52 flex-col fixed left-4 top-4 bottom-4 rounded-3xl glass-panel z-40 shadow-premium dark:shadow-glass">
+      <aside className="hidden lg:flex w-52 flex-col fixed left-4 top-4 bottom-4 rounded-3xl glass-panel z-40 shadow-premium dark:shadow-glass">
         <div className="p-5">
-          <h1 className="text-lg font-black tracking-tight text-zinc-900 dark:text-white font-mono flex items-center gap-2">
-            <div className="w-3.5 h-3.5 bg-brand-500 rounded-sm rotate-45 shadow-[0_0_10px_rgba(124,92,255,0.8)]" />
-            UFLOW
-          </h1>
-          <div className="mt-1.5 flex items-center gap-1.5">
+          <img src="/logo.png" alt="uFlow" className="h-10" />
+          <div className="mt-1 flex items-center gap-1.5">
              <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
              <p className="text-[9px] text-zinc-400 font-mono tracking-widest uppercase">System Online</p>
           </div>
@@ -842,21 +855,21 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
       </aside>
 
       {/* Main Content - Padded for floating sidebar */}
-      <main className="flex-1 flex flex-col relative min-w-0 md:pl-60 transition-all duration-300">
+      <main className="flex-1 flex flex-col relative min-w-0 lg:pl-60 transition-all duration-300">
 
         {/* Header - Floating Glass */}
-        <header className="h-12 sm:h-14 flex items-center justify-between px-2.5 sm:px-4 md:px-6 z-30 sticky top-0 mt-2 sm:mt-3 mx-2 sm:mx-3 md:mx-6 rounded-xl sm:rounded-2xl glass-panel shadow-premium dark:shadow-glass-sm mb-3 sm:mb-4">
+        <header className="h-12 sm:h-14 flex items-center justify-between px-2.5 sm:px-4 lg:px-6 z-30 sticky top-0 mt-2 sm:mt-3 mx-2 sm:mx-3 lg:mx-6 rounded-xl sm:rounded-2xl glass-panel shadow-premium dark:shadow-glass-sm mb-3 sm:mb-4">
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-            <button className="md:hidden p-1.5 text-zinc-600 dark:text-zinc-300 rounded-xl hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors shrink-0" onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
+            <button className="lg:hidden p-1.5 text-zinc-600 dark:text-zinc-300 rounded-xl hover:bg-zinc-100 dark:hover:bg-white/10 transition-colors shrink-0" onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}>
               <Menu className="w-5 h-5" />
             </button>
-            <h2 className="text-sm sm:text-base font-bold text-zinc-900 dark:text-white tracking-tight truncate">
+            <h2 className="text-base sm:text-lg font-bold text-zinc-900 dark:text-white tracking-tight truncate">
               {NAV_ITEMS.find(n => n.id === currentView)?.label}
             </h2>
           </div>
 
-          <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 shrink-0">
-            {/* Create with AI Button */}
+          {/* Action buttons — hidden on xs, shown from sm up */}
+          <div className="hidden sm:flex items-center gap-1.5 md:gap-2 shrink-0">
             <Button
                variant="primary"
                size="sm"
@@ -864,34 +877,33 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                onClick={() => setAiCreateOpen(true)}
             >
                <Sparkles className="w-3.5 h-3.5" />
-               <span className="hidden sm:inline">{t('act.create_ai')}</span>
+               <span>{t('act.create_ai')}</span>
             </Button>
 
             <Button variant="icon" size="sm" className="sm:h-9 sm:w-9" onClick={togglePrivacy} title="Toggle Privacy">
-              {privacyMode ? <EyeOff className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <Eye className="w-3.5 h-3.5 sm:w-4 sm:h-4" />}
+              {privacyMode ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
             </Button>
-            <Button variant="icon" size="sm" className="hidden sm:flex sm:h-9 sm:w-9" onClick={toggleTheme}>
+            <Button variant="icon" size="sm" className="sm:h-9 sm:w-9" onClick={toggleTheme}>
               {theme === 'dark' ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
             </Button>
-            <div className="h-5 sm:h-6 w-px bg-zinc-200 dark:bg-white/10 hidden sm:block mx-0.5 sm:mx-1" />
+            <div className="h-6 w-px bg-zinc-200 dark:bg-white/10 mx-0.5 sm:mx-1" />
             <Button variant="secondary" size="sm" onClick={() => setTransferOpen(true)} className="rounded-xl sm:h-9 sm:px-4 sm:text-sm">
               <ArrowRightLeft className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">{t('act.transfer')}</span>
+              <span>{t('act.transfer')}</span>
             </Button>
             <Button size="sm" onClick={() => setQuickInputOpen(true)} className="rounded-xl shadow-neon hover:shadow-neon-sm transition-shadow sm:h-9 sm:px-4 sm:text-sm">
               <Plus className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">New Entry</span>
+              <span>New Entry</span>
             </Button>
           </div>
         </header>
 
         {/* Mobile Nav Drawer */}
         {isMobileMenuOpen && (
-           <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-md md:hidden animate-in fade-in" onClick={() => setIsMobileMenuOpen(false)}>
+           <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-md lg:hidden animate-in fade-in" onClick={() => setIsMobileMenuOpen(false)}>
              <div className="w-60 h-full glass-panel border-r border-white/10 p-5 flex flex-col animate-in slide-in-from-left duration-300 shadow-2xl" onClick={e => e.stopPropagation()}>
-                <div className="mb-6 px-2 flex items-center gap-2">
-                   <div className="w-4 h-4 bg-brand-500 rounded-sm rotate-45 shadow-[0_0_15px_rgba(124,92,255,0.8)]" />
-                   <h1 className="text-lg font-bold font-mono text-zinc-900 dark:text-white">UFLOW</h1>
+                <div className="mb-6 px-2">
+                   <img src="/logo.png" alt="uFlow" className="h-9" />
                 </div>
                 <nav className="space-y-1">
                   {NAV_ITEMS.map(item => (
@@ -909,7 +921,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
         )}
 
         {/* Scrollable View Area */}
-        <div className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-6 pb-24 md:pb-6 relative scroll-smooth">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-6 pb-24 sm:pb-6 relative scroll-smooth">
           <div className="max-w-7xl mx-auto space-y-5">
              {children}
           </div>
@@ -917,9 +929,24 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
         
         {/* Toast Container */}
         <ToastContainer toasts={toasts} removeToast={removeToast} />
+
+        {/* Mobile Bottom Bar — xs only (< 640px) */}
+        <div className="sm:hidden fixed bottom-0 left-0 right-0 z-50 glass-panel border-t border-zinc-200 dark:border-white/10 shadow-[0_-4px_20px_rgba(0,0,0,0.1)]">
+          <div className="flex items-center justify-around h-12 px-6">
+            <button onClick={() => setTransferOpen(true)} className="p-2 text-zinc-500 dark:text-zinc-400 hover:text-brand-500 transition-colors">
+              <ArrowRightLeft className="w-5 h-5" />
+            </button>
+            <button onClick={() => setQuickInputOpen(true)} className="w-10 h-10 rounded-full bg-gradient-to-br from-brand-500 to-fuchsia-600 text-white shadow-neon-sm flex items-center justify-center active:scale-95 transition-transform">
+              <Plus className="w-5 h-5" />
+            </button>
+            <button onClick={togglePrivacy} className="p-2 text-zinc-500 dark:text-zinc-400 hover:text-brand-500 transition-colors">
+              {privacyMode ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+            </button>
+          </div>
+        </div>
       </main>
 
-      <QuickInputModal isOpen={isQuickInputOpen} onClose={() => setQuickInputOpen(false)} />
+      <QuickInputModal isOpen={isQuickInputOpen} onClose={() => setQuickInputOpen(false)} onOpenAI={() => setAiCreateOpen(true)} />
       <CreateWithAIModal isOpen={isAiCreateOpen} onClose={() => setAiCreateOpen(false)} />
       <EditTransactionModal />
       <TransferModal isOpen={isTransferOpen} onClose={() => setTransferOpen(false)} />

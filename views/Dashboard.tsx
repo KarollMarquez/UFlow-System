@@ -198,7 +198,7 @@ export const DashboardView: React.FC = () => {
 
       <div className="flex items-end justify-between z-10">
          <div>
-            <h3 className="text-2xl font-mono font-bold tracking-tighter text-zinc-900 dark:text-white drop-shadow-sm">
+            <h3 className="text-xl xl:text-2xl font-mono font-bold tracking-tighter text-zinc-900 dark:text-white drop-shadow-sm">
                 <Money amount={amount} currency={currencyBase} />
             </h3>
             <p className="text-[10px] text-zinc-400 font-medium mt-0.5">{sub}</p>
@@ -209,10 +209,10 @@ export const DashboardView: React.FC = () => {
   )};
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 relative">
+    <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 relative">
 
       {/* Column 1: Financial Status */}
-      <div className="space-y-4 lg:col-span-1 min-w-0">
+      <div className="space-y-4 min-w-0">
         <StatCard 
           title={t('dash.total')} 
           amount={assets} 
@@ -269,7 +269,7 @@ export const DashboardView: React.FC = () => {
       </div>
 
       {/* Column 2: Data Stream */}
-      <div className="lg:col-span-1 space-y-4 min-w-0">
+      <div className="space-y-4 min-w-0">
         {/* Quick Commands */}
         <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar px-1 py-1">
           {[
@@ -324,7 +324,7 @@ export const DashboardView: React.FC = () => {
                      </div>
                    </div>
                    <div className="text-right pl-3 shrink-0">
-                     <p className={`text-sm font-mono font-bold tracking-tight ${tx.type === 'income' ? 'text-green-600 dark:text-green-400 drop-shadow-sm' : 'text-zinc-900 dark:text-white'}`}>
+                     <p className={`text-xs xl:text-sm font-mono font-bold tracking-tight whitespace-nowrap ${tx.type === 'income' ? 'text-green-600 dark:text-green-400 drop-shadow-sm' : 'text-zinc-900 dark:text-white'}`}>
                        {tx.type === 'expense' ? '-' : '+'}<Money amount={tx.amount} currency={tx.currency} />
                      </p>
                      {isEditable && <button onClick={() => setEditingTransaction(tx)} className="text-[9px] font-bold text-brand-500 uppercase tracking-wide block opacity-0 group-hover:opacity-100 transition-opacity translate-y-1 group-hover:translate-y-0 duration-300 hover:text-brand-400 cursor-pointer">EDIT 72H</button>}
@@ -337,7 +337,7 @@ export const DashboardView: React.FC = () => {
       </div>
 
       {/* Column 3: Risk & Targets */}
-      <div className="lg:col-span-1 space-y-4 min-w-0">
+      <div className="lg:col-span-2 xl:col-span-1 grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-1 gap-4 min-w-0">
         {/* Risk Assessment - Dynamic */}
         {(() => {
           const isLow = riskScore < 30;

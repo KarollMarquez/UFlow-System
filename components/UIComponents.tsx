@@ -131,6 +131,13 @@ export const Select: React.FC<SelectProps> = ({ label, value, onChange, options,
 
   const selectedOption = options.find(o => o.value === value) || options[0];
 
+  // Sync parent state when displayed value differs from actual value
+  useEffect(() => {
+    if (options.length > 0 && !options.find(o => o.value === value) && options[0]) {
+      onChange(options[0].value);
+    }
+  }, [value, options, onChange]);
+
   return (
     <div className={cn("space-y-2 w-full min-w-0 relative group", className)} ref={containerRef}>
       {label && <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest ml-1 group-focus-within:text-brand-500 transition-colors">{label}</label>}
@@ -240,15 +247,15 @@ export const Toggle: React.FC<ToggleProps> = ({ label, checked, onChange }) => {
 export const Modal: React.FC<{ isOpen: boolean; onClose: () => void; title: string; children: React.ReactNode }> = ({ isOpen, onClose, title, children }) => {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/40 backdrop-blur-md animate-in fade-in duration-300">
-      <div className="w-full sm:max-w-md glass-panel rounded-t-2xl sm:rounded-2xl shadow-2xl animate-in slide-in-from-bottom-5 sm:zoom-in-95 duration-300 max-h-[85vh] sm:max-h-[90vh] overflow-y-auto border border-white/20 dark:border-white/10">
-        <div className="flex items-center justify-between p-3 sm:p-4 border-b border-zinc-200/50 dark:border-white/10 sticky top-0 bg-white/80 dark:bg-[#151520]/80 backdrop-blur-xl z-10">
+    <div className="fixed inset-0 z-50 flex items-stretch sm:items-center justify-center p-0 sm:p-4 bg-black/40 backdrop-blur-md animate-in fade-in duration-300">
+      <div className="w-full sm:max-w-md glass-panel rounded-none sm:rounded-2xl shadow-2xl animate-in slide-in-from-bottom-5 sm:zoom-in-95 duration-300 h-full sm:h-auto sm:max-h-[90vh] overflow-y-auto border-0 sm:border border-white/20 dark:border-white/10 flex flex-col">
+        <div className="flex items-center justify-between p-3 sm:p-4 border-b border-zinc-200/50 dark:border-white/10 sticky top-0 bg-white/80 dark:bg-[#151520]/80 backdrop-blur-xl z-10 shrink-0">
           <h3 className="font-bold text-base tracking-tight text-zinc-900 dark:text-white">{title}</h3>
           <button onClick={onClose} className="p-1.5 hover:bg-zinc-100 dark:hover:bg-white/10 rounded-full transition-colors group">
             <X className="w-4 h-4 text-zinc-500 group-hover:text-red-500 transition-colors" />
           </button>
         </div>
-        <div className="p-4">{children}</div>
+        <div className="p-4 flex-1 overflow-y-auto">{children}</div>
       </div>
     </div>
   );
