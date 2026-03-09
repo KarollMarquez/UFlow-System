@@ -152,12 +152,16 @@ const features = [
 
 /* ───────────────────── MAIN COMPONENT ─────────────────── */
 export const LandingPage: React.FC<{ onGoToApp: () => void }> = ({ onGoToApp }) => {
-  const [email, setEmail] = useState('');
-  const [submitted, setSubmitted] = useState(false);
   const [mobileMenu, setMobileMenu] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [showTerms, setShowTerms] = useState(false);
   const [showPrivacy, setShowPrivacy] = useState(false);
+  const [showWaitlist, setShowWaitlist] = useState(false);
+  const [wlName, setWlName] = useState('');
+  const [wlEmail, setWlEmail] = useState('');
+  const [wlPhone, setWlPhone] = useState('');
+  const [wlStatus, setWlStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [wlError, setWlError] = useState('');
 
   // Enable body scroll for landing page (body has overflow-hidden for the app)
   useEffect(() => {
@@ -171,13 +175,31 @@ export const LandingPage: React.FC<{ onGoToApp: () => void }> = ({ onGoToApp }) 
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  const handleWaitlist = (e: React.FormEvent) => {
+  const handleWaitlist = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email.trim()) return;
-    // TODO: connect to actual waitlist API (e.g. Firebase collection, Mailchimp, etc.)
-    setSubmitted(true);
-    setTimeout(() => setSubmitted(false), 5000);
-    setEmail('');
+    if (!wlEmail.trim() || !wlName.trim()) return;
+    setWlStatus('loading');
+    setWlError('');
+    try {
+      const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      const apiBase = isDev ? 'http://localhost:3001' : '';
+      const res = await fetch(`${apiBase}/api/waitlist`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: wlEmail, name: wlName, phone: wlPhone }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data.success) {
+        setWlStatus('success');
+        setWlName(''); setWlEmail(''); setWlPhone('');
+      } else {
+        setWlStatus('error');
+        setWlError(data.error || 'Error al registrarte. Intenta de nuevo.');
+      }
+    } catch {
+      setWlStatus('error');
+      setWlError('Error de conexion. Intenta de nuevo.');
+    }
   };
 
   const scrollTo = (id: string) => {
@@ -273,7 +295,7 @@ export const LandingPage: React.FC<{ onGoToApp: () => void }> = ({ onGoToApp }) 
             <button onClick={onGoToApp} className="hidden sm:inline-flex text-sm text-zinc-600 dark:text-zinc-400 hover:text-brand-600 dark:hover:text-brand-400 font-medium transition-colors">
               Iniciar sesion
             </button>
-            <button onClick={() => scrollTo('waitlist')} className="px-4 py-2 text-sm font-semibold text-white bg-gradient-to-r from-brand-600 to-brand-500 rounded-full shadow-neon-sm hover:shadow-neon transition-all hover:brightness-110 active:scale-95">
+            <button onClick={() => { setWlStatus('idle'); setShowWaitlist(true); }} className="px-4 py-2 text-sm font-semibold text-white bg-gradient-to-r from-brand-600 to-brand-500 rounded-full shadow-neon-sm hover:shadow-neon transition-all hover:brightness-110 active:scale-95">
               Unirse gratis
             </button>
             {/* Mobile hamburger */}
@@ -327,12 +349,12 @@ export const LandingPage: React.FC<{ onGoToApp: () => void }> = ({ onGoToApp }) 
             </Reveal>
 
             <Reveal delay={300}>
-              <form onSubmit={handleWaitlist} className="mt-8 flex flex-col sm:flex-row gap-3 max-w-md mx-auto">
+              <form onSubmit={(e) => { e.preventDefault(); setWlStatus('idle'); setShowWaitlist(true); }} className="mt-8 flex flex-col sm:flex-row gap-3 max-w-md mx-auto">
                 <input
                   type="email"
                   placeholder="tu@email.com"
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
+                  value={wlEmail}
+                  onChange={e => setWlEmail(e.target.value)}
                   required
                   className="flex-1 px-5 py-3 rounded-full bg-white dark:bg-white/5 border border-zinc-200 dark:border-white/10 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500/50 shadow-sm placeholder:text-zinc-400"
                 />
@@ -340,56 +362,57 @@ export const LandingPage: React.FC<{ onGoToApp: () => void }> = ({ onGoToApp }) 
                   type="submit"
                   className="px-6 py-3 text-sm font-semibold text-white bg-gradient-to-r from-brand-600 to-brand-500 rounded-full shadow-neon-sm hover:shadow-neon transition-all hover:brightness-110 active:scale-95 whitespace-nowrap"
                 >
-                  {submitted ? 'Te avisaremos!' : 'Unirme a la lista'}
+                  Unirme a la lista
                 </button>
               </form>
-              <p className="mt-3 text-xs text-zinc-400">Gratis. Sin spam. Te avisamos cuando este listo.</p>
+              <p className="mt-3 text-xs text-zinc-400 text-center">Gratis. Sin spam. Te avisamos cuando este listo.</p>
             </Reveal>
 
-            {/* ═══════════════ VIDEO DEMO ═══════════════ */}
-            <Section id="demo" className="bg-zinc-50/80 dark:bg-white/[0.02]">
-              <Container>
-                <div className="text-center max-w-2xl mx-auto mb-12">
-                  <Reveal>
-                    <Badge>Demo</Badge>
-                  </Reveal>
-                  <Reveal delay={100}>
-                    <h2 className="mt-4 text-3xl sm:text-4xl font-bold tracking-tight">Mira uFlow en accion</h2>
-                  </Reveal>
-                  <Reveal delay={200}>
-                    <p className="mt-4 text-zinc-500">Un recorrido rapido por las funcionalidades principales de la app.</p>
-                  </Reveal>
-                </div>
-
-                <Reveal delay={300}>
-                  <div className="relative max-w-4xl mx-auto">
-                    <div className="absolute inset-0 bg-gradient-to-t from-brand-500/10 to-fuchsia-500/5 rounded-3xl blur-2xl -z-10 scale-95" />
-                    <div className="bg-white dark:bg-dark-surface rounded-2xl sm:rounded-3xl border border-zinc-200/60 dark:border-white/10 shadow-premium overflow-hidden">
-                      {/* Browser bar */}
-                      <div className="flex items-center gap-2 px-4 py-3 bg-zinc-50 dark:bg-white/5 border-b border-zinc-200/50 dark:border-white/5">
-                        <div className="flex gap-1.5">
-                          <div className="w-3 h-3 rounded-full bg-red-400" />
-                          <div className="w-3 h-3 rounded-full bg-yellow-400" />
-                          <div className="w-3 h-3 rounded-full bg-green-400" />
-                        </div>
-                        <div className="flex-1 ml-3">
-                          <div className="max-w-xs mx-auto px-3 py-1 bg-white dark:bg-white/10 rounded-md text-[10px] text-zinc-400 font-mono text-center">app.uflow.com</div>
-                        </div>
-                      </div>
-                      <video
-                        src="/video.mp4"
-                        autoPlay
-                        loop
-                        muted
-                        playsInline
-                        className="w-full h-auto block"
-                      />
-                    </div>
-                  </div>
-                </Reveal>
-              </Container>
-            </Section>
           </div>
+        </Container>
+      </Section>
+
+      {/* ═══════════════ VIDEO DEMO ═══════════════ */}
+      <Section id="demo" className="bg-zinc-50/80 dark:bg-white/[0.02]">
+        <Container>
+          <div className="text-center max-w-2xl mx-auto mb-12">
+            <Reveal>
+              <Badge>Demo</Badge>
+            </Reveal>
+            <Reveal delay={100}>
+              <h2 className="mt-4 text-3xl sm:text-4xl font-bold tracking-tight">Mira uFlow en accion</h2>
+            </Reveal>
+            <Reveal delay={200}>
+              <p className="mt-4 text-zinc-500">Un recorrido rapido por las funcionalidades principales de la app.</p>
+            </Reveal>
+          </div>
+
+          <Reveal delay={300}>
+            <div className="relative">
+              <div className="absolute inset-0 bg-gradient-to-t from-brand-500/10 to-fuchsia-500/5 rounded-3xl blur-2xl -z-10 scale-95" />
+              <div className="bg-white dark:bg-dark-surface rounded-2xl sm:rounded-3xl border border-zinc-200/60 dark:border-white/10 shadow-premium overflow-hidden">
+                {/* Browser bar */}
+                <div className="flex items-center gap-2 px-4 py-3 bg-zinc-50 dark:bg-white/5 border-b border-zinc-200/50 dark:border-white/5">
+                  <div className="flex gap-1.5">
+                    <div className="w-3 h-3 rounded-full bg-red-400" />
+                    <div className="w-3 h-3 rounded-full bg-yellow-400" />
+                    <div className="w-3 h-3 rounded-full bg-green-400" />
+                  </div>
+                  <div className="flex-1 ml-3">
+                    <div className="max-w-xs mx-auto px-3 py-1 bg-white dark:bg-white/10 rounded-md text-[10px] text-zinc-400 font-mono text-center">app.uflow.com</div>
+                  </div>
+                </div>
+                <video
+                  src="https://pfio4ihjr5cj5xrr.public.blob.vercel-storage.com/video.mp4"
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  className="w-full h-auto block"
+                />
+              </div>
+            </div>
+          </Reveal>
         </Container>
       </Section>
 
@@ -515,25 +538,41 @@ export const LandingPage: React.FC<{ onGoToApp: () => void }> = ({ onGoToApp }) 
         </Container>
       </Section>
 
-      {/* Hero mockup / dashboard screenshot */}
-            <Reveal delay={400}>
-              <div className="mt-14 relative">
-                <div className="absolute inset-0 bg-gradient-to-t from-brand-500/10 to-transparent rounded-3xl blur-2xl -z-10 scale-95" />
-                <div className="bg-white dark:bg-dark-surface rounded-2xl sm:rounded-3xl border border-zinc-200/80 dark:border-white/10 shadow-premium overflow-hidden">
-                  <div className="flex items-center gap-2 px-4 py-3 bg-zinc-50 dark:bg-white/5 border-b border-zinc-200/50 dark:border-white/5">
-                    <div className="flex gap-1.5">
-                      <div className="w-3 h-3 rounded-full bg-red-400" />
-                      <div className="w-3 h-3 rounded-full bg-yellow-400" />
-                      <div className="w-3 h-3 rounded-full bg-green-400" />
-                    </div>
-                    <div className="flex-1 ml-3">
-                      <div className="max-w-xs mx-auto px-3 py-1 bg-white dark:bg-white/10 rounded-md text-[10px] text-zinc-400 font-mono text-center">app.uflow.com</div>
-                    </div>
-                  </div>
-                  <img src="/dashboard.png" alt="uFlow Dashboard" className="w-full h-auto block" />
-                </div>
-              </div>
+      {/* ═══════════════ DASHBOARD SCREENSHOT ═══════════════ */}
+      <Section>
+        <Container>
+          <div className="text-center max-w-2xl mx-auto mb-12">
+            <Reveal>
+              <Badge>Asi se ve uFlow por dentro</Badge>
             </Reveal>
+            <Reveal delay={100}>
+              <h2 className="mt-4 text-3xl sm:text-4xl font-bold tracking-tight">Tu dashboard financiero</h2>
+            </Reveal>
+            <Reveal delay={200}>
+              <p className="mt-4 text-zinc-500">Todo tu panorama financiero en una sola vista. Claro, limpio y al punto.</p>
+            </Reveal>
+          </div>
+
+          <Reveal delay={300}>
+            <div className="relative max-w-4xl mx-auto">
+              <div className="absolute inset-0 bg-gradient-to-t from-brand-500/10 to-transparent rounded-3xl blur-2xl -z-10 scale-95" />
+              <div className="bg-white dark:bg-dark-surface rounded-2xl sm:rounded-3xl border border-zinc-200/80 dark:border-white/10 shadow-premium overflow-hidden">
+                <div className="flex items-center gap-2 px-4 py-3 bg-zinc-50 dark:bg-white/5 border-b border-zinc-200/50 dark:border-white/5">
+                  <div className="flex gap-1.5">
+                    <div className="w-3 h-3 rounded-full bg-red-400" />
+                    <div className="w-3 h-3 rounded-full bg-yellow-400" />
+                    <div className="w-3 h-3 rounded-full bg-green-400" />
+                  </div>
+                  <div className="flex-1 ml-3">
+                    <div className="max-w-xs mx-auto px-3 py-1 bg-white dark:bg-white/10 rounded-md text-[10px] text-zinc-400 font-mono text-center">app.uflow.com</div>
+                  </div>
+                </div>
+                <img src="/dashboard.png" alt="uFlow Dashboard" className="w-full h-auto block" />
+              </div>
+            </div>
+          </Reveal>
+        </Container>
+      </Section>
 
       {/* ═══════════════ STATS ═══════════════ */}
       <Section>
@@ -643,29 +682,14 @@ export const LandingPage: React.FC<{ onGoToApp: () => void }> = ({ onGoToApp }) 
                   Se de los primeros en usar uFlow
                 </h2>
                 <p className="mt-3 text-zinc-500 text-sm sm:text-base max-w-md mx-auto">
-                  Estamos en beta privado. Dejanos tu email y te avisaremos cuando tengas acceso. Sin spam, lo prometemos.
+                  Estamos en beta privado. Dejanos tus datos y te avisaremos cuando tengas acceso. Sin spam, lo prometemos.
                 </p>
-                <form onSubmit={handleWaitlist} className="mt-8 flex flex-col sm:flex-row gap-3 max-w-md mx-auto">
-                  <input
-                    type="email"
-                    placeholder="tu@email.com"
-                    value={email}
-                    onChange={e => setEmail(e.target.value)}
-                    required
-                    className="flex-1 px-5 py-3 rounded-full bg-zinc-50 dark:bg-white/5 border border-zinc-200 dark:border-white/10 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500/50 placeholder:text-zinc-400"
-                  />
-                  <button
-                    type="submit"
-                    className="px-6 py-3 text-sm font-semibold text-white bg-gradient-to-r from-brand-600 to-brand-500 rounded-full shadow-neon-sm hover:shadow-neon transition-all hover:brightness-110 active:scale-95 whitespace-nowrap"
-                  >
-                    {submitted ? 'Listo!' : 'Unirme gratis'}
-                  </button>
-                </form>
-                {submitted && (
-                  <p className="mt-3 text-sm text-green-600 font-medium animate-in fade-in slide-in-from-bottom-2 duration-300">
-                    Genial! Te notificaremos cuando tu acceso este listo.
-                  </p>
-                )}
+                <button
+                  onClick={() => { setWlStatus('idle'); setShowWaitlist(true); }}
+                  className="mt-8 px-8 py-3.5 text-sm font-semibold text-white bg-gradient-to-r from-brand-600 to-brand-500 rounded-full shadow-neon-sm hover:shadow-neon transition-all hover:brightness-110 active:scale-95 whitespace-nowrap"
+                >
+                  Unirme a la lista de espera
+                </button>
               </div>
             </div>
           </Reveal>
@@ -729,6 +753,101 @@ export const LandingPage: React.FC<{ onGoToApp: () => void }> = ({ onGoToApp }) 
       {/* ═══════════════ MODALS ═══════════════ */}
       {showTerms && <TermsModal />}
       {showPrivacy && <PrivacyModal />}
+
+      {/* Waitlist Modal */}
+      {showWaitlist && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" onClick={() => setShowWaitlist(false)}>
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+          <div
+            className="relative w-full max-w-md bg-white dark:bg-dark-surface rounded-2xl shadow-2xl border border-zinc-200/60 dark:border-white/10 p-6 sm:p-8 animate-in fade-in zoom-in-95 duration-300"
+            onClick={e => e.stopPropagation()}
+          >
+            <button onClick={() => setShowWaitlist(false)} className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-600 transition-colors">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5"><path d="M18 6L6 18M6 6l12 12" /></svg>
+            </button>
+
+            {wlStatus === 'success' ? (
+              <div className="text-center py-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                <div className="w-14 h-14 mx-auto rounded-full bg-green-50 flex items-center justify-center mb-4">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="w-7 h-7 text-green-500"><path d="M20 6L9 17l-5-5" /></svg>
+                </div>
+                <h3 className="text-xl font-bold text-zinc-900 dark:text-white">Estas en la lista!</h3>
+                <p className="mt-2 text-sm text-zinc-500">Te notificaremos cuando tu acceso este listo. Revisa tu correo.</p>
+                <button
+                  onClick={() => setShowWaitlist(false)}
+                  className="mt-6 px-6 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-brand-600 to-brand-500 rounded-full shadow-neon-sm hover:shadow-neon transition-all hover:brightness-110 active:scale-95"
+                >
+                  Listo
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="text-center mb-6">
+                  <div className="w-12 h-12 mx-auto bg-brand-500/10 rounded-xl flex items-center justify-center mb-3">
+                    <img src="/icon.png" alt="uFlow" className="w-8 h-8" />
+                  </div>
+                  <h3 className="text-xl font-bold text-zinc-900 dark:text-white">Unete a la lista de espera</h3>
+                  <p className="mt-1 text-sm text-zinc-500">Se de los primeros en usar uFlow</p>
+                </div>
+
+                {wlStatus === 'error' && wlError && (
+                  <div className="mb-4 p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-600 animate-in slide-in-from-top-2 duration-300">
+                    {wlError}
+                  </div>
+                )}
+
+                <form onSubmit={handleWaitlist} className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-500 mb-1.5">Nombre *</label>
+                    <input
+                      type="text"
+                      value={wlName}
+                      onChange={e => setWlName(e.target.value)}
+                      placeholder="Tu nombre"
+                      required
+                      className="w-full px-4 py-2.5 rounded-xl bg-zinc-50 dark:bg-white/5 border border-zinc-200 dark:border-white/10 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500/50 placeholder:text-zinc-400 transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-500 mb-1.5">Email *</label>
+                    <input
+                      type="email"
+                      value={wlEmail}
+                      onChange={e => setWlEmail(e.target.value)}
+                      placeholder="tu@email.com"
+                      required
+                      className="w-full px-4 py-2.5 rounded-xl bg-zinc-50 dark:bg-white/5 border border-zinc-200 dark:border-white/10 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500/50 placeholder:text-zinc-400 transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-500 mb-1.5">Telefono <span className="text-zinc-400">(opcional)</span></label>
+                    <input
+                      type="tel"
+                      value={wlPhone}
+                      onChange={e => setWlPhone(e.target.value)}
+                      placeholder="+57 300 123 4567"
+                      className="w-full px-4 py-2.5 rounded-xl bg-zinc-50 dark:bg-white/5 border border-zinc-200 dark:border-white/10 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500/50 placeholder:text-zinc-400 transition-all"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={wlStatus === 'loading'}
+                    className="w-full mt-2 py-3 text-sm font-semibold text-white bg-gradient-to-r from-brand-600 to-brand-500 rounded-xl shadow-neon-sm hover:shadow-neon transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {wlStatus === 'loading' ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        Registrando...
+                      </span>
+                    ) : 'Unirme a la lista'}
+                  </button>
+                </form>
+                <p className="mt-3 text-[10px] text-zinc-400 text-center">Sin spam. Solo te avisaremos cuando tu acceso este listo.</p>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
